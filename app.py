@@ -1,9 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 from sklearn.linear_model import LinearRegression
-from io import BytesIO
 import openai
 
 st.set_page_config(page_title="Reels Reach Predictor", layout="wide")
@@ -17,22 +15,23 @@ model = None
 
 # --- Clean numeric columns ---
 for col in ['reach', 'likes', 'comments', 'shares', 'saved']:
-    df[col] = (
-        df[col]
-        .astype(str)
-        .str.replace(r'[^\d.]', '', regex=True)
-        .replace('', np.nan)
-        .astype(float)
-    )
+    if col in df.columns:
+        df[col] = (
+            df[col]
+            .astype(str)
+            .str.replace(r'[^\d.]', '', regex=True)
+            .replace('', np.nan)
+            .astype(float)
+        )
 
 # --- Parse and filter by date ---
 if 'date' in df.columns:
     df['date'] = pd.to_datetime(df['date'], errors='coerce')
     df = df.dropna(subset=['date'])
-    if not df['date'].dt.tz:
-        df['date'] = df['date'].dt.tz_localize('Asia/Kolkata', ambiguous='NaT', nonexistent='NaT')
-    else:
+    try:
         df['date'] = df['date'].dt.tz_convert('Asia/Kolkata')
+    except TypeError:
+        df['date'] = df['date'].dt.tz_localize('Asia/Kolkata', ambiguous='NaT', nonexistent='NaT')
 
     min_date, max_date = df['date'].min().date(), df['date'].max().date()
     start_date, end_date = st.date_input("Select Date Range", [min_date, max_date])
@@ -94,7 +93,7 @@ if 'date' in display_df.columns:
 
 # --- Content-Based Insights ---
 openai.api_key = st.secrets.get("OPENAI_API_KEY", "")
-if 'caption' in df.columns:
+if 'caption' in df.columns and len(df) > 0:
     st.subheader("🧠 Content Intelligence")
     sample_titles = df['caption'].dropna().sample(min(5, len(df))).tolist()
     prompt = f"""
