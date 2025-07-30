@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score, mean_squared_error
 import openai
@@ -57,22 +56,20 @@ model = LinearRegression().fit(X, y)
 df['predicted_reach'] = model.predict(X)
 
 # Compute accuracy metrics
-y_true = y
-y_pred = df['predicted_reach']
-r2   = r2_score(y_true, y_pred)
-rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+r2   = r2_score(y, df['predicted_reach'])
+rmse = np.sqrt(mean_squared_error(y, df['predicted_reach']))
 
 # ── Categorize performance ────────────────────────────────────────────────────
 def categorize(a,p):
-    if p <= 0: return 'Uncategorized'
-    r = a/p
-    if r > 2.0:    return 'Viral'
-    if r > 1.5:    return 'Excellent'
-    if r > 1.0:    return 'Good'
-    if r > 0.5:    return 'Average'
+    if p <= 0:       return 'Uncategorized'
+    ratio = a/p
+    if ratio > 2.0:  return 'Viral'
+    if ratio > 1.5:  return 'Excellent'
+    if ratio > 1.0:  return 'Good'
+    if ratio > 0.5:  return 'Average'
     return 'Poor'
 
-df['performance'] = df.apply(lambda row: categorize(row['reach'], row['predicted_reach']), axis=1)
+df['performance'] = df.apply(lambda r: categorize(r['reach'], r['predicted_reach']), axis=1)
 
 # ── Formatting helper ──────────────────────────────────────────────────────────
 def fmt(n):
@@ -96,9 +93,9 @@ c2.metric("Total Predicted Reach", fmt(total_pred))
 c3.metric("Deviation %",           f"{deviation:.2f}%")
 
 with st.expander("🧠 Why is the deviation high?"):
-    st.markdown("- Outliers/collabs skew totals.")
-    st.markdown("- Linear model may under/over estimate extremes.")
-    st.markdown("- Summary covers only Viral & Excellent posts.")
+    st.markdown("- Collab/outlier reels skew totals.")
+    st.markdown("- Linear model can under/over estimate extremes.")
+    st.markdown("- Only the Viral & Excellent subset is summarized.")
 
 # ── Viral & Excellent Reels Table ─────────────────────────────────────────────
 st.subheader("🔥 Viral & Excellent Reels")
@@ -113,13 +110,9 @@ if not ve.empty:
         'shares':'Shares','saved':'Saves','comments':'Comments','likes':'Likes',
         'reach':'Reach','predicted_reach':'Predicted Reach','performance':'Performance'
     })
-    try:
-        styled = disp.style.set_properties(
-            subset=['Caption'], **{'white-space':'pre-wrap'}
-        )
-        st.dataframe(styled, use_container_width=True)
-    except:
-        st.dataframe(disp, use_container_width=True)
+    st.dataframe(disp.style.set_properties(
+        subset=['Caption'], **{'white-space':'pre-wrap'}
+    ), use_container_width=True)
 else:
     st.write("No Viral or Excellent reels in this range.")
 
@@ -130,17 +123,21 @@ perf_counts = df['performance'].value_counts().reindex(
 )
 st.bar_chart(perf_counts)
 
-# ── Model Accuracy Scatter ────────────────────────────────────────────────────
-st.subheader("🔍 Actual vs Predicted Reach")
-st.markdown(f"**R² score:** {r2:.2f} | **RMSE:** {fmt(rmse)}")
-fig, ax = plt.subplots(figsize=(5,4))
-ax.scatter(y_pred, y_true, alpha=0.5)
-maxv = max(y_true.max(), y_pred.max())
-ax.plot([0, maxv], [0, maxv], '--', color='red', linewidth=1)
-ax.set_xlabel("Predicted Reach")
-ax.set_ylabel("Actual Reach")
-ax.set_title("Actual vs Predicted Reach")
-st.pyplot(fig)
+# ── Reach Trend Over Time ─────────────────────────────────────────────────────
+st.subheader("📈 Reach Trend Over Time")
+if 'post_date' in df.columns:
+    ts = (
+        df.set_index('post_date')
+          .resample('W')
+          .mean()[['reach','predicted_reach']]
+          .rename(columns={'reach':'Actual Reach','predicted_reach':'Predicted Reach'})
+    )
+    st.line_chart(ts)
+
+# ── Engagement Correlation with Reach ─────────────────────────────────────────
+st.subheader("🔗 Engagement Correlation with Reach")
+corr = df[['shares','saved','comments','likes','reach']].corr()['reach'].drop('reach')
+st.bar_chart(corr)
 
 # ── Content Intelligence (NLP) ─────────────────────────────────────────────────
 st.subheader("🧠 Content Intelligence (NLP)")
@@ -151,16 +148,16 @@ else:
     client = openai.OpenAI(api_key=api_key)
     text_col = 'caption' if 'caption' in df.columns else ('title' if 'title' in df.columns else None)
     if not text_col:
-        st.info("No 'caption' or 'title' column for NLP analysis.")
+        st.info("No caption/title column found for NLP.")
     else:
         texts = df[text_col].dropna().astype(str)
         if texts.empty:
             st.info(f"No data in '{text_col}'.")
         else:
-            sample = texts.sample(min(5,len(texts))).tolist()
+            sample = texts.sample(min(5, len(texts))).tolist()
             prompt = (
-                f"You are an Instagram strategist. Analyze these {text_col}s for patterns, themes, and tone:\n"
-                + "\n".join(sample)
+                f"You are an Instagram strategist. Analyze these {text_col}s "
+                "for patterns, themes, and tone:\n" + "\n".join(sample)
             )
             try:
                 resp = client.chat.completions.create(
@@ -174,12 +171,12 @@ else:
 st.subheader("📈 Top Content by Virality Score")
 df['virality_score'] = df['reach'] / np.where(df['predicted_reach']==0, np.nan, df['predicted_reach'])
 df['virality_score'] = df['virality_score'].replace([np.inf,-np.inf],np.nan).fillna(0)
-top5 = df.nlargest(5,'virality_score')
+top5 = df.nlargest(5, 'virality_score')
 if 'caption' in top5.columns:
     t5 = top5[['caption','reach','predicted_reach','virality_score']].copy()
     t5['reach']           = t5['reach'].apply(fmt)
     t5['predicted_reach'] = t5['predicted_reach'].apply(fmt)
-    t5['virality_score']  = t5['virality_score'].apply(lambda x:f"{x:.2f}x")
+    t5['virality_score']  = t5['virality_score'].apply(lambda x: f"{x:.2f}x")
     t5 = t5.rename(columns={
         'caption':'Caption','reach':'Reach',
         'predicted_reach':'Predicted Reach','virality_score':'Virality Score'
@@ -202,10 +199,8 @@ st.markdown("""
 # ── Download & Predict ─────────────────────────────────────────────────────────
 st.subheader("⬇️ Download Full Data")
 st.download_button(
-    "Download CSV",
-    df.to_csv(index=False).encode('utf-8'),
-    "reels_with_predictions.csv",
-    mime="text/csv"
+    "Download CSV", df.to_csv(index=False).encode('utf-8'),
+    "reels_with_predictions.csv", mime="text/csv"
 )
 
 st.subheader("🎯 Predict Reach for a New Reel (Post‑launch)")
