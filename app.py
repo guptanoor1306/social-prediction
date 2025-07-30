@@ -101,12 +101,13 @@ display_df = df[df['performance'].isin(['Viral', 'Excellent'])].copy()
 display_df['reach'] = display_df['reach'].apply(format_number)
 display_df['predicted_reach'] = display_df['predicted_reach'].apply(format_number)
 st.dataframe(display_df.sort_values(by='reach', ascending=False)
-             [['date', 'title', 'reach', 'predicted_reach', 'performance']])
+             [[col for col in ['date', 'title', 'reach', 'predicted_reach', 'performance'] if col in display_df.columns]])
 
 # --- Key Takeaways ---
 st.subheader("📌 Quick Insights")
-most_saved = df.loc[df['title'].str.contains('save', case=False, na=False)].iloc[0]
-st.markdown(f"✅ Reel with highest saves-like title: **{most_saved['title']}**")
+most_saved = df.loc[df['title'].str.contains('save', case=False, na=False)].iloc[0] if 'title' in df.columns else None
+if most_saved is not None:
+    st.markdown(f"✅ Reel with highest saves-like title: **{most_saved['title']}**")
 most_shared = df.sort_values(by='shares', ascending=False).iloc[0]
 st.markdown(f"✅ Reel with highest shares: **{most_shared['title']}** with {int(most_shared['shares'])} shares")
 viral_count = df[df['performance'] == 'Viral'].shape[0]
