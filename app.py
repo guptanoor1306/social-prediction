@@ -104,25 +104,43 @@ else:
     st.write("No Viral or Excellent reels in this range.")
 
 # --- Content Intelligence (NLP) ---
-openai.api_key = st.secrets.get("OPENAI_API_KEY", "")
-if not openai.api_key:
-    st.warning("OpenAI API key not found. Please add it to Streamlit secrets.")
+# Debug: show first few rows and columns to verify caption field
+st.subheader("🔎 Data Preview")
+st.write("Columns:", df.columns.tolist())
+st.write(df.head(3))
+
+# Load API key from secrets (supporting both root and [general] table)
+api_key = st.secrets.get("OPENAI_API_KEY") or st.secrets.get("general", {}).get("OPENAI_API_KEY")
+if not api_key:
+    st.warning("OpenAI API key not found. Please add OPENAI_API_KEY to Streamlit secrets at root level.")
 else:
-    st.write("✅ OpenAI API key loaded.")
-    if 'caption' in df.columns and not df['caption'].dropna().empty:
-        st.subheader("🧠 Content Intelligence")
-        sample_captions = df['caption'].dropna().sample(min(5, len(df))).tolist()
-        prompt = "You are an Instagram strategist. Analyze these captions for patterns and tone:\n" + "\n".join(sample_captions)
-        try:
-            resp = openai.ChatCompletion.create(
-                model="gpt-4",
-                messages=[{"role":"user","content":prompt}]
-            )
-            st.markdown(resp.choices[0].message.content)
-        except Exception as e:
-            st.error(f"🛑 NLP analysis error: {e}")
+    openai.api_key = api_key
+    st.success("✅ OpenAI API key loaded.")
+    # Determine text column
+    text_col = 'caption' if 'caption' in df.columns else ('title' if 'title' in df.columns else None)
+    if not text_col:
+        st.info("No caption or title column available for NLP analysis.")
     else:
-        st.info("No captions available for NLP analysis.")
+        texts = df[text_col].dropna().astype(str)
+        if texts.empty:
+            st.info(f"No data in {text_col} column for NLP analysis.")
+        else:
+            st.subheader(f"🧠 Content Intelligence using '{text_col}'")
+            sample_texts = texts.sample(min(5, len(texts))).tolist()
+            prompt = (
+                f"You are an Instagram strategist. Analyze these {text_col}s for patterns, themes, and tone:
+"
+                + "
+".join(sample_texts)
+            )
+            try:
+                resp = openai.ChatCompletion.create(
+                    model="gpt-4",
+                    messages=[{"role":"user","content":prompt}]
+                )
+                st.markdown(resp.choices[0].message.content)
+            except Exception as e:
+                st.error(f"🛑 NLP analysis error: {e}")
 
 # --- Virality Score ---
 st.subheader("📊 Top Content by Virality Score")
