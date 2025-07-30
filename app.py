@@ -19,12 +19,14 @@ if 'type' in df.columns:
 # Clean numeric fields
 for col in ['reach', 'likes', 'comments', 'shares', 'saved']:
     if col in df.columns:
-        df[col] = (df[col].astype(str)
-                        .str.replace(r'[^\d.]', '', regex=True)
-                        .replace('', np.nan))
+        df[col] = (
+            df[col].astype(str)
+                   .str.replace(r'[^\d.]', '', regex=True)
+                   .replace('', np.nan)
+        )
         df[col] = pd.to_numeric(df[col], errors='coerce')
 
-# Identify date column and filter
+# Identify and filter by date column
 date_col = next((c for c in df.columns if 'date' in c), None)
 if date_col:
     df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
@@ -102,8 +104,7 @@ else:
     st.write("No Viral or Excellent reels in this range.")
 
 # --- Content Intelligence (NLP) ---
-openai.api_key = st.secrets.get("OPENAI_API_KEY", "")  
-# Debug: show if API key loaded
+openai.api_key = st.secrets.get("OPENAI_API_KEY", "")
 if not openai.api_key:
     st.warning("OpenAI API key not found. Please add it to Streamlit secrets.")
 else:
@@ -111,9 +112,7 @@ else:
     if 'caption' in df.columns and not df['caption'].dropna().empty:
         st.subheader("🧠 Content Intelligence")
         sample_captions = df['caption'].dropna().sample(min(5, len(df))).tolist()
-        prompt = "You are an Instagram strategist. Analyze these captions for patterns and tone:
-" + "
-".join(sample_captions)
+        prompt = "You are an Instagram strategist. Analyze these captions for patterns and tone:\n" + "\n".join(sample_captions)
         try:
             resp = openai.ChatCompletion.create(
                 model="gpt-4",
@@ -129,7 +128,6 @@ else:
 st.subheader("📊 Top Content by Virality Score")
 df['virality_score'] = df['reach']/np.where(df['predicted_reach']==0, np.nan, df['predicted_reach'])
 df['virality_score'] = df['virality_score'].replace([np.inf,-np.inf], np.nan).fillna(0)
-
 top5 = df.sort_values('virality_score', ascending=False).head(5)
 top5_display = top5[['caption','reach','predicted_reach','virality_score']].copy()
 top5_display['reach'] = top5_display['reach'].apply(fmt)
