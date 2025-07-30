@@ -127,12 +127,11 @@ else:
         else:
             st.subheader(f"🧠 Content Intelligence using '{text_col}'")
             sample_texts = texts.sample(min(5, len(texts))).tolist()
-                        prompt = (
+            prompt = (
                 f"You are an Instagram strategist. Analyze these {text_col}s for patterns, themes, and tone:
 "
                 + "
 ".join(sample_texts)
-            )
             )
             try:
                 resp = openai.ChatCompletion.create(
