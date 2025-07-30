@@ -38,13 +38,11 @@ if date_col:
         "Select date range",
         [df['post_date'].min(), df['post_date'].max()]
     )
-    # Handle single date or tuple/list
+    # handle single vs range
     if isinstance(dates, (list, tuple)) and len(dates) == 2:
         start_date, end_date = dates
     else:
         start_date = end_date = dates
-
-    # Apply filter
     df = df[df['post_date'].between(start_date, end_date)]
 else:
     st.sidebar.info("No date column found for filtering.")
@@ -61,50 +59,42 @@ def categorize(r, p):
     if p == 0:
         return 'Uncategorized'
     ratio = r / p
-    if ratio > 2.0:
-        return 'Viral'
-    if ratio > 1.5:
-        return 'Excellent'
-    if ratio > 1.0:
-        return 'Good'
-    if ratio > 0.5:
-        return 'Average'
+    if ratio > 2.0:    return 'Viral'
+    if ratio > 1.5:    return 'Excellent'
+    if ratio > 1.0:    return 'Good'
+    if ratio > 0.5:    return 'Average'
     return 'Poor'
 
 df['performance'] = df.apply(lambda row: categorize(row['reach'], row['predicted_reach']), axis=1)
 
 # --- Number formatting ---
 def fmt(n):
-    if pd.isna(n):
-        return "-"
-    if n >= 1e6:
-        return f"{n/1e6:.2f}M"
-    if n >= 1e3:
-        return f"{n/1e3:.1f}K"
+    if pd.isna(n):  return "-"
+    if n >= 1e6:    return f"{n/1e6:.2f}M"
+    if n >= 1e3:    return f"{n/1e3:.1f}K"
     return str(int(n))
 
-# --- Summary Metrics (Totals) ---
-st.subheader("📈 Summary Insights")
+# --- Select Viral & Excellent subset for summary totals ---
+ve = df[df['performance'].isin(['Viral', 'Excellent'])]
+
+# --- Summary Metrics (Viral & Excellent Totals) ---
+st.subheader("📈 Summary Insights (Viral & Excellent Totals)")
 col1, col2, col3 = st.columns(3)
-total_act = df['reach'].sum()
-total_pred = df['predicted_reach'].sum()
-mean_err = np.mean(
-    np.abs((df['reach'] - df['predicted_reach']) /
-           np.where(df['predicted_reach'] == 0, 1, df['predicted_reach']))
-) * 100
+total_act = ve['reach'].sum()
+total_pred = ve['predicted_reach'].sum()
+deviation = abs(total_act - total_pred) / total_pred * 100 if total_pred else 0
 
 col1.metric("Total Actual Reach", fmt(total_act))
 col2.metric("Total Predicted Reach", fmt(total_pred))
-col3.metric("Mean % Error", f"{mean_err:.2f}%")
+col3.metric("Deviation %", f"{deviation:.2f}%")
 
-with st.expander("🧠 Why is the error high?"):
-    st.markdown("- Collab or outlier posts can skew predictions.")
-    st.markdown("- Linear regression may not capture nonlinear influencer effects.")
-    st.markdown("- Factors like audio trends, timing, and hashtags aren’t model inputs.")
+with st.expander("🧠 Why is the deviation high?"):
+    st.markdown("- Outlier and collab reels can skew totals.")
+    st.markdown("- The linear model may under/over estimate extremes.")
+    st.markdown("- Analysis limited to Viral & Excellent subset.")
 
-# --- Viral & Excellent Reels ---
+# --- Viral & Excellent Reels Table ---
 st.subheader("🔥 Viral & Excellent Reels")
-ve = df[df['performance'].isin(['Viral', 'Excellent'])]
 if not ve.empty:
     ve_display = ve.copy()
     display_cols = ['post_date', 'caption'] + features + ['reach', 'predicted_reach', 'performance']
@@ -112,19 +102,18 @@ if not ve.empty:
     ve_display['reach'] = ve_display['reach'].apply(fmt)
     ve_display['predicted_reach'] = ve_display['predicted_reach'].apply(fmt)
     ve_display = ve_display.rename(columns={
-        'post_date': 'Date',
-        'caption': 'Caption',
-        'reach': 'Reach',
+        'post_date':       'Date',
+        'caption':         'Caption',
+        'reach':           'Reach',
         'predicted_reach': 'Predicted Reach',
-        'performance': 'Performance'
+        'performance':     'Performance'
     })
-    # Wrap caption text
     try:
         styled = ve_display.style.set_properties(
             subset=['Caption'], **{'white-space': 'pre-wrap'}
         )
         st.dataframe(styled, use_container_width=True)
-    except Exception:
+    except:
         st.dataframe(ve_display.sort_values('Reach', ascending=False), use_container_width=True)
 else:
     st.write("No Viral or Excellent reels in this range.")
@@ -133,16 +122,16 @@ else:
 st.subheader("🧠 Content Intelligence (NLP)")
 api_key = st.secrets.get("OPENAI_API_KEY") or st.secrets.get("general", {}).get("OPENAI_API_KEY")
 if not api_key:
-    st.warning("🛑 OpenAI API key not found. Please add OPENAI_API_KEY to Streamlit secrets.")
+    st.warning("🛑 Add OPENAI_API_KEY to Streamlit secrets.")
 else:
     client = openai.OpenAI(api_key=api_key)
     text_col = 'caption' if 'caption' in df.columns else ('title' if 'title' in df.columns else None)
     if not text_col:
-        st.info("No 'caption' or 'title' column available for NLP analysis.")
+        st.info("No 'caption' or 'title' column for NLP.")
     else:
         texts = df[text_col].dropna().astype(str)
         if texts.empty:
-            st.info(f"No data in '{text_col}' for NLP analysis.")
+            st.info(f"No data in '{text_col}'.")
         else:
             sample_texts = texts.sample(min(5, len(texts))).tolist()
             prompt = (
@@ -152,7 +141,7 @@ else:
             try:
                 resp = client.chat.completions.create(
                     model="gpt-4",
-                    messages=[{"role":"user","content":prompt}]
+                    messages=[{"role": "user", "content": prompt}]
                 )
                 st.markdown(resp.choices[0].message.content)
             except Exception as e:
@@ -163,7 +152,6 @@ st.subheader("📊 Top Content by Virality Score")
 df['virality_score'] = df['reach'] / np.where(df['predicted_reach'] == 0, np.nan, df['predicted_reach'])
 df['virality_score'] = df['virality_score'].replace([np.inf, -np.inf], np.nan).fillna(0)
 top5 = df.sort_values('virality_score', ascending=False).head(5)
-
 if 'caption' in top5.columns:
     t5 = top5[['caption', 'reach', 'predicted_reach', 'virality_score']].copy()
     t5['reach'] = t5['reach'].apply(fmt)
@@ -182,11 +170,9 @@ else:
 # --- Strategic Takeaways ---
 st.subheader("🚀 Strategic Takeaways")
 st.markdown("""
-- **Double down on collaborations:** Collab reels outperform solo by ~30–40% reach.
-- **Focus on shareable tips:** Top reels have share rate >2% & save rate >1.5%.
-- **Emphasize business/empowerment themes:** Podcasts, motivation, entrepreneurship drive engagement.
-- **Post timing matters:** Weekdays, 6–9 PM IST sees highest reach.
-- **Use emojis & 2–3 hashtags:** Improves tone and discoverability.
+- **Collabs drive outsized totals:** Partner reels skew totals higher.
+- **Model limitations at extremes:** Very high‐reach reels may be underpredicted.
+- **Focus your Viral & Excellent content patterns.**
 """)
 
 # --- Download Data ---
