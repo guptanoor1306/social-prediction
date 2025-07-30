@@ -43,40 +43,42 @@ if uploaded_data:
 
     df['performance'] = df.apply(categorize, axis=1)
 
-    # --- Summary ---
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Avg Actual Reach", f"{int(df['reach'].mean()):,}")
-    col2.metric("Avg Predicted Reach", f"{int(df['predicted_reach'].mean()):,}")
-    col3.metric("Mean % Error", f"{np.mean(np.abs((df['reach'] - df['predicted_reach']) / df['predicted_reach']) * 100):.2f}%")
-
-    # --- Category Counts ---
-    st.subheader("📌 Performance Distribution")
-    category_counts = df['performance'].value_counts()
-    st.bar_chart(category_counts)
-
-    # --- Viral Reels Table ---
-    st.subheader("🔥 Viral & Excellent Reels")
-    st.dataframe(df[df['performance'].isin(['Viral', 'Excellent'])].sort_values(by='reach', ascending=False))
-
     # --- Time Filter ---
     st.subheader("📅 Filter by Post Date")
     if 'date' in df.columns:
         df['date'] = pd.to_datetime(df['date'], errors='coerce')
-    
-        # Set timezone to match date column
-        if df['date'].dt.tz is None:
-            df['date'] = df['date'].dt.tz_localize("Asia/Kolkata")
-        else:
-            df['date'] = df['date'].dt.tz_convert("Asia/Kolkata")
-    
+        df = df.dropna(subset=['date'])
+        df['date'] = df['date'].dt.tz_localize('Asia/Kolkata', ambiguous='NaT', nonexistent='NaT')
         min_date, max_date = df['date'].min().date(), df['date'].max().date()
         start_date, end_date = st.date_input("Select Date Range", [min_date, max_date])
-    
-        # Convert selected dates to timezone-aware Timestamps
+
         start_date = pd.Timestamp(start_date).tz_localize("Asia/Kolkata")
         end_date = pd.Timestamp(end_date).tz_localize("Asia/Kolkata")
-    
+
         df = df[(df['date'] >= start_date) & (df['date'] <= end_date)]
+
+    # --- Summary Metrics ---
+    st.subheader("📈 Summary Insights")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Avg Actual Reach", f"{int(df['reach'].mean()):,}")
+    col2.metric("Avg Predicted Reach", f"{int(df['predicted_reach'].mean()):,}")
+    error = np.mean(np.abs((df['reach'] - df['predicted_reach']) / df['predicted_reach']) * 100)
+    col3.metric("Mean % Error", f"{error:.2f}%")
+
+    # --- Performance Table ---
+    st.subheader("🔥 Viral & Excellent Reels")
+    st.dataframe(df[df['performance'].isin(['Viral', 'Excellent'])]
+                 .sort_values(by='reach', ascending=False)
+                 [['date', 'title', 'reach', 'predicted_reach', 'performance']])
+
+    # --- Key Takeaways ---
+    st.subheader("📌 Quick Insights")
+    most_saved = df.sort_values(by='saves', ascending=False).iloc[0]
+    st.markdown(f"✅ Reel with highest saves: **{most_saved['title']}** with {int(most_saved['saves'])} saves")
+    most_shared = df.sort_values(by='shares', ascending=False).iloc[0]
+    st.markdown(f"✅ Reel with highest shares: **{most_shared['title']}** with {int(most_shared['shares'])} shares")
+    viral_count = df[df['performance'] == 'Viral'].shape[0]
+    st.markdown(f"✅ Number of Viral Reels: **{viral_count}**")
 
     # --- Export to CSV ---
     st.subheader("⬇️ Download Full Categorized Data")
@@ -88,17 +90,9 @@ if uploaded_data:
         mime='text/csv'
     )
 
-    # --- Scatter Plot ---
-    st.subheader("📈 Actual vs Predicted Reach")
-    fig, ax = plt.subplots()
-    ax.scatter(df['predicted_reach'], df['reach'], alpha=0.7, color='mediumslateblue')
-    ax.plot([0, df['predicted_reach'].max()], [0, df['predicted_reach'].max()], 'r--')
-    ax.set_xlabel("Predicted Reach")
-    ax.set_ylabel("Actual Reach")
-    st.pyplot(fig)
-
 # --- Prediction Tool ---
 st.subheader("🎯 Predict Reach for a New Reel")
+st.markdown("⚠️ Note: Predictions are accurate only **after your reel has gone live**, since `likes`, `shares`, etc. are required inputs.")
 
 with st.form("predict_form"):
     shares = st.number_input("Shares", min_value=0, value=0)
