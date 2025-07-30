@@ -10,6 +10,8 @@ st.title("📊 Instagram Reels Performance Dashboard")
 
 # --- Load historical data ---
 df = pd.read_csv("posts_zero1byzerodha.csv")
+df.columns = df.columns.str.strip().str.lower()  # Standardize column names
+st.write("Column names:", df.columns.tolist())  # Debug
 model = None
 
 # --- Clean unexpected symbols and convert ---
