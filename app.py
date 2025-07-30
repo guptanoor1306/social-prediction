@@ -39,7 +39,7 @@ if date_col:
         "Select date range",
         [df['post_date'].min(), df['post_date'].max()]
     )
-    if isinstance(dates, (list,tuple)) and len(dates)==2:
+    if isinstance(dates, (list, tuple)) and len(dates) == 2:
         start_date, end_date = dates
     else:
         start_date = end_date = dates
@@ -60,13 +60,14 @@ r2   = r2_score(y, df['predicted_reach'])
 rmse = np.sqrt(mean_squared_error(y, df['predicted_reach']))
 
 # ── Categorize performance ────────────────────────────────────────────────────
-def categorize(a,p):
-    if p <= 0:       return 'Uncategorized'
-    ratio = a/p
-    if ratio > 2.0:  return 'Viral'
-    if ratio > 1.5:  return 'Excellent'
-    if ratio > 1.0:  return 'Good'
-    if ratio > 0.5:  return 'Average'
+def categorize(a, p):
+    if p <= 0:
+        return 'Poor'  # treat zero predictions as lowest
+    r = a / p
+    if r > 2.0:    return 'Viral'
+    if r > 1.5:    return 'Excellent'
+    if r > 1.0:    return 'Good'
+    if r > 0.5:    return 'Average'
     return 'Poor'
 
 df['performance'] = df.apply(lambda r: categorize(r['reach'], r['predicted_reach']), axis=1)
@@ -90,12 +91,12 @@ deviation  = (abs(total_act - total_pred) / total_pred * 100) if total_pred else
 
 c1.metric("Total Actual Reach",    fmt(total_act))
 c2.metric("Total Predicted Reach", fmt(total_pred))
-c3.metric("Deviation %",           f"{deviation:.2f}%")
+c3.metric("Deviation %",           f"{deviation:.2f}%")
 
 with st.expander("🧠 Why is the deviation high?"):
     st.markdown("- Collab/outlier reels skew totals.")
-    st.markdown("- Linear model can under/over estimate extremes.")
-    st.markdown("- Only the Viral & Excellent subset is summarized.")
+    st.markdown("- Linear regression may under/over estimate extremes.")
+    st.markdown("- Only Viral & Excellent subset is summarized.")
 
 # ── Viral & Excellent Reels Table ─────────────────────────────────────────────
 st.subheader("🔥 Viral & Excellent Reels")
@@ -110,9 +111,10 @@ if not ve.empty:
         'shares':'Shares','saved':'Saves','comments':'Comments','likes':'Likes',
         'reach':'Reach','predicted_reach':'Predicted Reach','performance':'Performance'
     })
-    st.dataframe(disp.style.set_properties(
-        subset=['Caption'], **{'white-space':'pre-wrap'}
-    ), use_container_width=True)
+    st.dataframe(
+        disp.style.set_properties(subset=['Caption'], **{'white-space':'pre-wrap'}),
+        use_container_width=True
+    )
 else:
     st.write("No Viral or Excellent reels in this range.")
 
@@ -126,18 +128,19 @@ st.bar_chart(perf_counts)
 # ── Reach Trend Over Time ─────────────────────────────────────────────────────
 st.subheader("📈 Reach Trend Over Time")
 if 'post_date' in df.columns:
-    # Create a datetime index
     df['post_date_dt'] = pd.to_datetime(df['post_date'])
     weekly = (
         df.set_index('post_date_dt')
-          .resample('W')
-          .mean()[['reach','predicted_reach']]
-          .rename(columns={
-              'reach':'Actual Reach',
-              'predicted_reach':'Predicted Reach'
-          })
+          .resample('W')[['reach','predicted_reach']]
+          .mean()
+          .rename(columns={'reach':'Actual Reach','predicted_reach':'Predicted Reach'})
     )
     st.line_chart(weekly)
+
+# ── Engagement Correlation with Reach ─────────────────────────────────────────
+st.subheader("🔗 Engagement Correlation with Reach")
+corr = df[['shares','saved','comments','likes','reach']].corr()['reach'].drop('reach')
+st.bar_chart(corr)
 
 # ── Content Intelligence (NLP) ─────────────────────────────────────────────────
 st.subheader("🧠 Content Intelligence (NLP)")
@@ -156,8 +159,8 @@ else:
         else:
             sample = texts.sample(min(5, len(texts))).tolist()
             prompt = (
-                f"You are an Instagram strategist. Analyze these {text_col}s "
-                "for patterns, themes, and tone:\n" + "\n".join(sample)
+                f"You are an Instagram strategist. Analyze these {text_col}s for patterns, themes, and tone:\n"
+                + "\n".join(sample)
             )
             try:
                 resp = client.chat.completions.create(
@@ -170,7 +173,7 @@ else:
 # ── Top 5 by Virality Score ────────────────────────────────────────────────────
 st.subheader("📈 Top Content by Virality Score")
 df['virality_score'] = df['reach'] / np.where(df['predicted_reach']==0, np.nan, df['predicted_reach'])
-df['virality_score'] = df['virality_score'].replace([np.inf,-np.inf],np.nan).fillna(0)
+df['virality_score'] = df['virality_score'].replace([np.inf, -np.inf], np.nan).fillna(0)
 top5 = df.nlargest(5, 'virality_score')
 if 'caption' in top5.columns:
     t5 = top5[['caption','reach','predicted_reach','virality_score']].copy()
@@ -198,10 +201,8 @@ st.markdown("""
 
 # ── Download & Predict ─────────────────────────────────────────────────────────
 st.subheader("⬇️ Download Full Data")
-st.download_button(
-    "Download CSV", df.to_csv(index=False).encode('utf-8'),
-    "reels_with_predictions.csv", mime="text/csv"
-)
+st.download_button("Download CSV", df.to_csv(index=False).encode('utf-8'),
+                   "reels_with_predictions.csv", mime="text/csv")
 
 st.subheader("🎯 Predict Reach for a New Reel (Post‑launch)")
 st.markdown("⚠️ Requires live engagement values.")
