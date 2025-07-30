@@ -10,6 +10,7 @@ st.title("📊 Instagram Reels Performance Dashboard")
 
 # --- Load historical data ---
 df = pd.read_csv("posts_zero1byzerodha.csv")
+df = df[df['type'].str.lower() == 'reel']  # Filter for Reels only
 df.columns = df.columns.str.strip().str.lower()  # Standardize column names
 st.write("Column names:", df.columns.tolist())  # Debug
 model = None
@@ -104,12 +105,23 @@ st.dataframe(display_df.sort_values(by='reach', ascending=False)
 
 # --- Key Takeaways ---
 st.subheader("📌 Quick Insights")
-most_saved = df.sort_values(by='saves', ascending=False).iloc[0]
-st.markdown(f"✅ Reel with highest saves: **{most_saved['title']}** with {int(most_saved['saves'])} saves")
+most_saved = df.loc[df['title'].str.contains('save', case=False, na=False)].iloc[0]
+st.markdown(f"✅ Reel with highest saves-like title: **{most_saved['title']}**")
 most_shared = df.sort_values(by='shares', ascending=False).iloc[0]
 st.markdown(f"✅ Reel with highest shares: **{most_shared['title']}** with {int(most_shared['shares'])} shares")
 viral_count = df[df['performance'] == 'Viral'].shape[0]
 st.markdown(f"✅ Number of Viral Reels: **{viral_count}**")
+
+# --- Collab vs Non-Collab Insights ---
+if 'collab' in df.columns:
+    df['is_collab'] = df['collab'].str.lower() == 'yes'
+    collab_viral_count = df[(df['performance'] == 'Viral') & (df['is_collab'])].shape[0]
+    noncollab_viral_count = df[(df['performance'] == 'Viral') & (~df['is_collab'])].shape[0]
+    st.markdown(f"🤝 Viral Collab Reels: **{collab_viral_count}**, Non-Collab: **{noncollab_viral_count}**")
+    avg_collab_reach = df[df['is_collab']]['reach'].mean()
+    avg_noncollab_reach = df[~df['is_collab']]['reach'].mean()
+    st.markdown(f"📊 Avg Reach - Collab: **{format_number(avg_collab_reach)}**, Non-Collab: **{format_number(avg_noncollab_reach)}**")
+    st.markdown("🔍 Collab reels may benefit from network effects, hence typically show higher reach. Use this insight to plan future collaborations.")
 
 # --- Export to CSV ---
 st.subheader("⬇️ Download Full Categorized Data")
