@@ -48,7 +48,11 @@ if uploaded_data:
     if 'date' in df.columns:
         df['date'] = pd.to_datetime(df['date'], errors='coerce')
         df = df.dropna(subset=['date'])
-        df['date'] = df['date'].dt.tz_localize('Asia/Kolkata', ambiguous='NaT', nonexistent='NaT')
+        if df['date'].dt.tz is None or df['date'].dt.tz.iloc[0] is None:
+            df['date'] = df['date'].dt.tz_localize('Asia/Kolkata')
+        else:
+            df['date'] = df['date'].dt.tz_convert('Asia/Kolkata')
+
         min_date, max_date = df['date'].min().date(), df['date'].max().date()
         start_date, end_date = st.date_input("Select Date Range", [min_date, max_date])
 
