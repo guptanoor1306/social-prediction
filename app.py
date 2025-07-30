@@ -49,10 +49,10 @@ if uploaded_data:
         df['date'] = pd.to_datetime(df['date'], errors='coerce')
         df = df.dropna(subset=['date'])
         if pd.api.types.is_datetime64_any_dtype(df['date']):
-            if df['date'].dt.tz is None or pd.isna(df['date'].dt.tz).all():
-                df['date'] = df['date'].dt.tz_localize('Asia/Kolkata')
-            else:
+            try:
                 df['date'] = df['date'].dt.tz_convert('Asia/Kolkata')
+            except TypeError:
+                df['date'] = df['date'].dt.tz_localize('Asia/Kolkata')
 
         min_date, max_date = df['date'].min().date(), df['date'].max().date()
         start_date, end_date = st.date_input("Select Date Range", [min_date, max_date])
