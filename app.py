@@ -4,7 +4,7 @@ import numpy as np
 from sklearn.linear_model import LinearRegression
 import openai
 
-# Page config
+# Page configuration
 st.set_page_config(page_title="Reels Reach Predictor", layout="wide")
 st.title("📊 Instagram Reels Performance Dashboard")
 
@@ -12,43 +12,42 @@ st.title("📊 Instagram Reels Performance Dashboard")
 df = pd.read_csv("posts_zero1byzerodha.csv")
 df.columns = df.columns.str.strip().str.lower()
 
-# Filter only Reels
-df = df[df.get('type', '').str.lower() == 'reel']
+# Filter to Reels only
+if 'type' in df.columns:
+    df = df[df['type'].str.lower() == 'reel']
 
 # Clean numeric fields
 for col in ['reach', 'likes', 'comments', 'shares', 'saved']:
     if col in df.columns:
         df[col] = (
             df[col].astype(str)
-                   .str.replace(r'[^\d.]', '', regex=True)
-                   .replace('', np.nan)
+                  .str.replace(r'[^\d.]', '', regex=True)
+                  .replace('', np.nan)
         )
         df[col] = pd.to_numeric(df[col], errors='coerce')
 
-# --- Date detection and filtering ---
-# Detect date column (contains 'date')
+# --- Date detection & filtering ---
 date_col = next((c for c in df.columns if 'date' in c), None)
 if date_col:
     df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
     df = df.dropna(subset=[date_col])
     df['post_date'] = df[date_col].dt.date
-    # Sidebar filter
+
     st.sidebar.subheader("📅 Filter by Post Date")
     start_date, end_date = st.sidebar.date_input(
-        "Select date range", [df['post_date'].min(), df['post_date'].max()]
+        "Select date range",
+        [df['post_date'].min(), df['post_date'].max()]
     )
-    # Filter
     df = df[df['post_date'].between(start_date, end_date)]
 else:
     st.sidebar.info("No date column found for filtering.")
 
-# --- Train model and predict ---
-# Prepare features
+# --- Train model & predict reach ---
 features = [f for f in ['shares', 'saved', 'comments', 'likes'] if f in df.columns]
-# Train
 X = df[features].fillna(0)
-Y = df['reach'].fillna(0)
-model = LinearRegression().fit(X, Y)
+y = df['reach'].fillna(0)
+
+model = LinearRegression().fit(X, y)
 df['predicted_reach'] = model.predict(X)
 
 # --- Categorize performance ---
@@ -66,7 +65,10 @@ def categorize(r, p):
         return 'Average'
     return 'Poor'
 
-df['performance'] = df.apply(lambda row: categorize(row['reach'], row['predicted_reach']), axis=1)
+df['performance'] = df.apply(
+    lambda row: categorize(row['reach'], row['predicted_reach']),
+    axis=1
+)
 
 # --- Number formatting ---
 def fmt(n):
@@ -102,25 +104,32 @@ if not ve.empty:
     ve_display = ve_display[[c for c in display_cols if c in ve_display.columns]]
     ve_display['reach'] = ve_display['reach'].apply(fmt)
     ve_display['predicted_reach'] = ve_display['predicted_reach'].apply(fmt)
-    ve_display = ve_display.rename(columns={'post_date': 'Date', 'reach': 'Reach', 'predicted_reach': 'Predicted Reach', 'performance': 'Performance'})
+    ve_display = ve_display.rename(columns={
+        'post_date': 'Date',
+        'reach': 'Reach',
+        'predicted_reach': 'Predicted Reach',
+        'performance': 'Performance'
+    })
     st.dataframe(ve_display.sort_values('Reach', ascending=False))
 else:
     st.write("No Viral or Excellent reels in this range.")
 
 # --- Content Intelligence (NLP) ---
 st.subheader("🧠 Content Intelligence (NLP)")
-api_key = st.secrets.get('OPENAI_API_KEY')
+
+# Load API key (supports root or [general] in secrets.toml)
+api_key = st.secrets.get("OPENAI_API_KEY") or st.secrets.get("general", {}).get("OPENAI_API_KEY")
 if not api_key:
-    st.warning("OpenAI API key not found. Please add OPENAI_API_KEY in Streamlit secrets.")
+    st.warning("🛑 OpenAI API key not found. Please add OPENAI_API_KEY to Streamlit secrets.")
 else:
-    openai.api_key = api_key
-    text_col = 'caption' if 'caption' in df.columns else ('title' if 'title' in df.columns else None)
+    client = openai.OpenAI(api_key=api_key)
+    text_col = "caption" if "caption" in df.columns else ("title" if "title" in df.columns else None)
     if not text_col:
-        st.info("No caption or title column available for NLP analysis.")
+        st.info("No 'caption' or 'title' column available for NLP analysis.")
     else:
         texts = df[text_col].dropna().astype(str)
         if texts.empty:
-            st.info(f"No data in {text_col} column for NLP analysis.")
+            st.info(f"No data in '{text_col}' for NLP analysis.")
         else:
             sample_texts = texts.sample(min(5, len(texts))).tolist()
             prompt = (
@@ -128,7 +137,7 @@ else:
                 + "\n".join(sample_texts)
             )
             try:
-                resp = openai.ChatCompletion.create(
+                resp = client.chat.completions.create(
                     model="gpt-4",
                     messages=[{"role": "user", "content": prompt}]
                 )
@@ -141,13 +150,18 @@ st.subheader("📊 Top Content by Virality Score")
 df['virality_score'] = df['reach'] / np.where(df['predicted_reach']==0, np.nan, df['predicted_reach'])
 df['virality_score'] = df['virality_score'].replace([np.inf, -np.inf], np.nan).fillna(0)
 top5 = df.sort_values('virality_score', ascending=False).head(5)
-top5_display = top5.copy()
-if 'caption' in top5_display.columns:
-    top5_display = top5_display[['caption', 'reach', 'predicted_reach', 'virality_score']]
+
+if 'caption' in top5.columns:
+    top5_display = top5[['caption', 'reach', 'predicted_reach', 'virality_score']].copy()
     top5_display['reach'] = top5_display['reach'].apply(fmt)
     top5_display['predicted_reach'] = top5_display['predicted_reach'].apply(fmt)
     top5_display['virality_score'] = top5_display['virality_score'].apply(lambda x: f"{x:.2f}x")
-    top5_display = top5_display.rename(columns={'caption': 'Caption', 'reach': 'Reach', 'predicted_reach': 'Predicted Reach', 'virality_score': 'Virality Score'})
+    top5_display = top5_display.rename(columns={
+        'caption': 'Caption',
+        'reach': 'Reach',
+        'predicted_reach': 'Predicted Reach',
+        'virality_score': 'Virality Score'
+    })
     st.dataframe(top5_display)
 else:
     st.write("No captions available for Virality Score table.")
