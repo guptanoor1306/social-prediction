@@ -126,18 +126,18 @@ st.bar_chart(perf_counts)
 # ── Reach Trend Over Time ─────────────────────────────────────────────────────
 st.subheader("📈 Reach Trend Over Time")
 if 'post_date' in df.columns:
-    ts = (
-        df.set_index('post_date')
+    # Create a datetime index
+    df['post_date_dt'] = pd.to_datetime(df['post_date'])
+    weekly = (
+        df.set_index('post_date_dt')
           .resample('W')
           .mean()[['reach','predicted_reach']]
-          .rename(columns={'reach':'Actual Reach','predicted_reach':'Predicted Reach'})
+          .rename(columns={
+              'reach':'Actual Reach',
+              'predicted_reach':'Predicted Reach'
+          })
     )
-    st.line_chart(ts)
-
-# ── Engagement Correlation with Reach ─────────────────────────────────────────
-st.subheader("🔗 Engagement Correlation with Reach")
-corr = df[['shares','saved','comments','likes','reach']].corr()['reach'].drop('reach')
-st.bar_chart(corr)
+    st.line_chart(weekly)
 
 # ── Content Intelligence (NLP) ─────────────────────────────────────────────────
 st.subheader("🧠 Content Intelligence (NLP)")
