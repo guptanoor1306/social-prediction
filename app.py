@@ -16,7 +16,7 @@ st.write("Column names:", df.columns.tolist())  # Debug
 model = None
 
 # --- Clean unexpected symbols and convert ---
-for col in ['reach', 'likes', 'comments', 'shares', 'saves']:
+for col in ['reach', 'likes', 'comments', 'shares', 'saved']:
     df[col] = (
         df[col]
         .astype(str)
@@ -31,7 +31,7 @@ if 'predicted_reach' in df.columns:
 if 'performance' in df.columns:
     df = df.drop(columns=['performance'])
 
-X = df[['shares', 'saves', 'comments', 'likes']]
+X = df[['shares', 'saved', 'comments', 'likes']]
 y = df['reach']
 model = LinearRegression().fit(X, y)
 df['predicted_reach'] = model.predict(X)
@@ -148,7 +148,7 @@ if submit:
     if model is not None:
         X_new = pd.DataFrame([{
             'shares': shares,
-            'saves': saves,
+            'saved': saves,
             'comments': comments,
             'likes': likes
         }])
