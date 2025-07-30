@@ -101,15 +101,43 @@ display_df = df[df['performance'].isin(['Viral', 'Excellent'])].copy()
 display_df['reach'] = display_df['reach'].apply(format_number)
 display_df['predicted_reach'] = display_df['predicted_reach'].apply(format_number)
 st.dataframe(display_df.sort_values(by='reach', ascending=False)
-             [[col for col in ['date', 'title', 'reach', 'predicted_reach', 'performance'] if col in display_df.columns]])
+             [[col for col in [col for col in ['date', 'caption', 'reach', 'predicted_reach', 'performance'] if col in display_df.columns] if col in display_df.columns]])
+
+# --- Content-Based Analysis (Pre-Reel Launch) ---
+import openai
+
+openai.api_key = st.secrets.get("OPENAI_API_KEY", "")
+
+if 'caption' in df.columns:
+    st.subheader("🧠 Content Intelligence (using NLP)")
+    sample_titles = df['caption'].dropna().sample(min(5, len(df))).tolist()
+    insights_prompt = f"""
+You are an Instagram Reels strategist. Based on these 5 reel titles:
+
+{chr(10).join(['- ' + t for t in sample_titles])}
+
+Give 3 bullet points:
+1. Common content patterns or themes
+2. Predicted tone or emotion (e.g. fun, serious, educational)
+3. One idea to improve virality based on this sample
+"""
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": insights_prompt}]
+        )
+        nlp_summary = response['choices'][0]['message']['content']
+        st.markdown(nlp_summary)
+    except Exception as e:
+        st.warning("Could not fetch content-based insights.")
 
 # --- Key Takeaways ---
 st.subheader("📌 Quick Insights")
-most_saved = df.loc[df['title'].str.contains('save', case=False, na=False)].iloc[0] if 'title' in df.columns else None
+most_saved = df.loc[df['caption'].str.contains('save', case=False, na=False)].iloc[0] if 'caption' in df.columns else None
 if most_saved is not None:
-    st.markdown(f"✅ Reel with highest saves-like title: **{most_saved['title']}**")
+    st.markdown(f"✅ Reel with highest saves-like caption: **{most_saved['caption']}**")
 most_shared = df.sort_values(by='shares', ascending=False).iloc[0]
-st.markdown(f"✅ Reel with highest shares: **{most_shared['title']}** with {int(most_shared['shares'])} shares")
+st.markdown(f"✅ Reel with highest shares: **{most_shared['caption']}** with {int(most_shared['shares'])} shares")
 viral_count = df[df['performance'] == 'Viral'].shape[0]
 st.markdown(f"✅ Number of Viral Reels: **{viral_count}**")
 
