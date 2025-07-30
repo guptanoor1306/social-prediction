@@ -3,14 +3,45 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.linear_model import LinearRegression
+from io import BytesIO
 
 st.set_page_config(page_title="Reels Reach Predictor", layout="wide")
 st.title("📊 Instagram Reels Performance Dashboard")
 
 # --- Load historical data ---
 uploaded_data = st.file_uploader("Upload your reels_model_output.csv", type="csv")
+df = None
+model = None
+
 if uploaded_data:
     df = pd.read_csv(uploaded_data)
+
+    # --- Train model from uploaded data without multiplying weights ---
+    if 'predicted_reach' in df.columns:
+        df = df.drop(columns=['predicted_reach'])
+    if 'performance' in df.columns:
+        df = df.drop(columns=['performance'])
+
+    X = df[['shares', 'saves', 'comments', 'likes']]
+    y = df['reach']
+    model = LinearRegression().fit(X, y)
+    df['predicted_reach'] = model.predict(X)
+
+    # --- Categorize performance ---
+    def categorize(row):
+        ratio = row['reach'] / row['predicted_reach'] if row['predicted_reach'] else 0
+        if ratio > 2.0:
+            return "Viral"
+        elif ratio > 1.5:
+            return "Excellent"
+        elif ratio > 1.0:
+            return "Good"
+        elif ratio > 0.5:
+            return "Average"
+        else:
+            return "Poor"
+
+    df['performance'] = df.apply(categorize, axis=1)
 
     # --- Summary ---
     col1, col2, col3 = st.columns(3)
@@ -22,6 +53,28 @@ if uploaded_data:
     st.subheader("📌 Performance Distribution")
     category_counts = df['performance'].value_counts()
     st.bar_chart(category_counts)
+
+    # --- Viral Reels Table ---
+    st.subheader("🔥 Viral & Excellent Reels")
+    st.dataframe(df[df['performance'].isin(['Viral', 'Excellent'])].sort_values(by='reach', ascending=False))
+
+    # --- Time Filter ---
+    st.subheader("📅 Filter by Post Date")
+    if 'date' in df.columns:
+        df['date'] = pd.to_datetime(df['date'], errors='coerce')
+        min_date, max_date = df['date'].min(), df['date'].max()
+        start_date, end_date = st.date_input("Select Date Range", [min_date, max_date])
+        df = df[(df['date'] >= pd.to_datetime(start_date)) & (df['date'] <= pd.to_datetime(end_date))]
+
+    # --- Export to CSV ---
+    st.subheader("⬇️ Download Full Categorized Data")
+    csv = df.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="Download CSV",
+        data=csv,
+        file_name='reels_with_predictions.csv',
+        mime='text/csv'
+    )
 
     # --- Scatter Plot ---
     st.subheader("📈 Actual vs Predicted Reach")
@@ -43,23 +96,13 @@ with st.form("predict_form"):
     submit = st.form_submit_button("Predict Reach")
 
 if submit:
-    # Apply strategic weights
-    X_new = pd.DataFrame([{
-        'shares': shares * 10,
-        'saves': saves * 5,
-        'comments': comments * 3,
-        'likes': likes * 2
-    }])
-
-    # Use hardcoded coefficients from your trained model
-    coef = np.array([model.coef_ for model in [LinearRegression()]])[0] if not uploaded_data else None
-
-    # Optional fallback linear model if file not uploaded
-    if uploaded_data:
-        # Train inline for demo (normally you'd load model)
-        X = df[['shares', 'saves', 'comments', 'likes']] * [10, 5, 3, 2]
-        y = df['reach']
-        model = LinearRegression().fit(X, y)
+    if model is not None:
+        X_new = pd.DataFrame([{
+            'shares': shares,
+            'saves': saves,
+            'comments': comments,
+            'likes': likes
+        }])
         prediction = model.predict(X_new)[0]
         st.success(f"📢 Predicted Reach: {int(prediction):,}")
     else:
