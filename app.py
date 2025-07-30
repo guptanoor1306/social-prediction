@@ -77,18 +77,18 @@ def fmt(n):
         return f"{n/1e3:.1f}K"
     return str(int(n))
 
-# --- Summary Metrics (Restored) ---
+# --- Summary Metrics (Totals) ---
 st.subheader("📈 Summary Insights")
 col1, col2, col3 = st.columns(3)
-avg_act = df['reach'].mean()
-avg_pred = df['predicted_reach'].mean()
+total_act = df['reach'].sum()
+total_pred = df['predicted_reach'].sum()
 mean_err = np.mean(
     np.abs((df['reach'] - df['predicted_reach']) /
            np.where(df['predicted_reach'] == 0, 1, df['predicted_reach']))
 ) * 100
 
-col1.metric("Avg Actual Reach", fmt(avg_act))
-col2.metric("Avg Predicted Reach", fmt(avg_pred))
+col1.metric("Total Actual Reach", fmt(total_act))
+col2.metric("Total Predicted Reach", fmt(total_pred))
 col3.metric("Mean % Error", f"{mean_err:.2f}%")
 
 with st.expander("🧠 Why is the error high?"):
@@ -112,7 +112,7 @@ if not ve.empty:
         'predicted_reach': 'Predicted Reach',
         'performance': 'Performance'
     })
-    # Wrap caption text
+    # Wrap caption text for visibility
     try:
         styled = ve_display.style.set_properties(
             subset=['Caption'], **{'white-space': 'pre-wrap'}
@@ -146,7 +146,7 @@ else:
             try:
                 resp = client.chat.completions.create(
                     model="gpt-4",
-                    messages=[{"role": "user", "content": prompt}]
+                    messages=[{"role":"user","content":prompt}]
                 )
                 st.markdown(resp.choices[0].message.content)
             except Exception as e:
