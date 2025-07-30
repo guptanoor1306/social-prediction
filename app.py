@@ -144,7 +144,8 @@ st.dataframe(top_ideas[[col for col in ['caption', 'reach', 'predicted_reach', '
 
 # --- Key Takeaways ---
 st.subheader("📌 Quick Insights")
-most_saved = df.loc[df['caption'].str.contains('save', case=False, na=False)].iloc[0] if 'caption' in df.columns else None
+most_saved_df = df.loc[df['caption'].str.contains('save', case=False, na=False)] if 'caption' in df.columns else pd.DataFrame()
+most_saved = most_saved_df.iloc[0] if not most_saved_df.empty else None
 if most_saved is not None:
     st.markdown(f"✅ Reel with highest saves-like caption: **{most_saved['caption']}**")
 most_shared = df.sort_values(by='shares', ascending=False).iloc[0]
