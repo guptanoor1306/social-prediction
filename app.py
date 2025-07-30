@@ -28,10 +28,13 @@ for col in ['reach', 'likes', 'comments', 'shares', 'saved']:
 if 'date' in df.columns:
     df['date'] = pd.to_datetime(df['date'], errors='coerce')
     df = df.dropna(subset=['date'])
-    if df['date'].dt.tz is None or df['date'].dt.tz.iloc[0] is None:
-        df['date'] = df['date'].dt.tz_localize('Asia/Kolkata', ambiguous='NaT', nonexistent='NaT')
-    else:
-        df['date'] = df['date'].dt.tz_convert('Asia/Kolkata')
+    try:
+        df['date'] = pd.to_datetime(df['date']).dt.tz_localize('Asia/Kolkata', ambiguous='NaT', nonexistent='NaT')
+    except Exception:
+        try:
+            df['date'] = df['date'].dt.tz_convert('Asia/Kolkata')
+        except Exception:
+            pass
 
     min_date, max_date = df['date'].min().date(), df['date'].max().date()
     start_date, end_date = st.date_input("Select Date Range", [min_date, max_date])
