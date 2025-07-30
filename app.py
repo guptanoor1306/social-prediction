@@ -102,19 +102,28 @@ else:
     st.write("No Viral or Excellent reels in this range.")
 
 # --- Content Intelligence (NLP) ---
-openai.api_key = st.secrets.get("OPENAI_API_KEY", "")
-if 'caption' in df.columns and not df['caption'].dropna().empty:
-    st.subheader("🧠 Content Intelligence")
-    sample_captions = df['caption'].dropna().sample(min(5, len(df))).tolist()
-    prompt = "You are an Instagram strategist. Analyze these captions for patterns and tone:\n" + "\n".join(sample_captions)
-    try:
-        resp = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[{"role":"user","content":prompt}]
-        )
-        st.markdown(resp.choices[0].message.content)
-    except Exception:
-        st.warning("Content insights unavailable.")
+openai.api_key = st.secrets.get("OPENAI_API_KEY", "")  
+# Debug: show if API key loaded
+if not openai.api_key:
+    st.warning("OpenAI API key not found. Please add it to Streamlit secrets.")
+else:
+    st.write("✅ OpenAI API key loaded.")
+    if 'caption' in df.columns and not df['caption'].dropna().empty:
+        st.subheader("🧠 Content Intelligence")
+        sample_captions = df['caption'].dropna().sample(min(5, len(df))).tolist()
+        prompt = "You are an Instagram strategist. Analyze these captions for patterns and tone:
+" + "
+".join(sample_captions)
+        try:
+            resp = openai.ChatCompletion.create(
+                model="gpt-4",
+                messages=[{"role":"user","content":prompt}]
+            )
+            st.markdown(resp.choices[0].message.content)
+        except Exception as e:
+            st.error(f"🛑 NLP analysis error: {e}")
+    else:
+        st.info("No captions available for NLP analysis.")
 
 # --- Virality Score ---
 st.subheader("📊 Top Content by Virality Score")
