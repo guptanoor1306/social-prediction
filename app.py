@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.linear_model import LinearRegression
-from sklearn.metrics import r2_score, mean_squared_error
 import openai
 
 # Page configuration
@@ -112,7 +111,7 @@ if not ve.empty:
         'predicted_reach': 'Predicted Reach',
         'performance': 'Performance'
     })
-    # Wrap caption text for visibility
+    # Wrap caption text
     try:
         styled = ve_display.style.set_properties(
             subset=['Caption'], **{'white-space': 'pre-wrap'}
