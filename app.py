@@ -131,6 +131,17 @@ Give 3 bullet points:
     except Exception as e:
         st.warning("Could not fetch content-based insights.")
 
+# --- Virality Score ---
+df['virality_score'] = df['reach'] / df['predicted_reach']
+df['virality_score'] = df['virality_score'].replace([np.inf, -np.inf], np.nan).fillna(0)
+
+st.subheader("📊 Top Content Ideas by Virality")
+top_ideas = df.sort_values(by='virality_score', ascending=False).head(5)
+top_ideas['reach'] = top_ideas['reach'].apply(format_number)
+top_ideas['predicted_reach'] = top_ideas['predicted_reach'].apply(format_number)
+top_ideas['virality_score'] = top_ideas['virality_score'].apply(lambda x: f"{x:.2f}x")
+st.dataframe(top_ideas[[col for col in ['caption', 'reach', 'predicted_reach', 'virality_score'] if col in top_ideas.columns]])
+
 # --- Key Takeaways ---
 st.subheader("📌 Quick Insights")
 most_saved = df.loc[df['caption'].str.contains('save', case=False, na=False)].iloc[0] if 'caption' in df.columns else None
