@@ -62,9 +62,21 @@ if uploaded_data:
     st.subheader("📅 Filter by Post Date")
     if 'date' in df.columns:
         df['date'] = pd.to_datetime(df['date'], errors='coerce')
-        min_date, max_date = df['date'].min(), df['date'].max()
+    
+        # Set timezone to match date column
+        if df['date'].dt.tz is None:
+            df['date'] = df['date'].dt.tz_localize("Asia/Kolkata")
+        else:
+            df['date'] = df['date'].dt.tz_convert("Asia/Kolkata")
+    
+        min_date, max_date = df['date'].min().date(), df['date'].max().date()
         start_date, end_date = st.date_input("Select Date Range", [min_date, max_date])
-        df = df[(df['date'] >= pd.to_datetime(start_date)) & (df['date'] <= pd.to_datetime(end_date))]
+    
+        # Convert selected dates to timezone-aware Timestamps
+        start_date = pd.Timestamp(start_date).tz_localize("Asia/Kolkata")
+        end_date = pd.Timestamp(end_date).tz_localize("Asia/Kolkata")
+    
+        df = df[(df['date'] >= start_date) & (df['date'] <= end_date)]
 
     # --- Export to CSV ---
     st.subheader("⬇️ Download Full Categorized Data")
