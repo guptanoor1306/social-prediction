@@ -84,7 +84,11 @@ avg_act = df['reach'].mean()
 y_true = df['reach'].fillna(0)
 y_pred = df['predicted_reach']
 r2 = r2_score(y_true, y_pred)
-rmse = mean_squared_error(y_true, y_pred, squared=False)
+
+# Compute RMSE manually for compatibility
+mse = mean_squared_error(y_true, y_pred)
+rmse = np.sqrt(mse)
+
 col1.metric("Avg Actual Reach", fmt(avg_act))
 col2.metric("Model R² Score", f"{r2:.2f}")
 col3.metric("Model RMSE", fmt(rmse))
@@ -155,6 +159,7 @@ st.subheader("📊 Top Content by Virality Score")
 df['virality_score'] = df['reach'] / np.where(df['predicted_reach'] == 0, np.nan, df['predicted_reach'])
 df['virality_score'] = df['virality_score'].replace([np.inf, -np.inf], np.nan).fillna(0)
 top5 = df.sort_values('virality_score', ascending=False).head(5)
+
 if 'caption' in top5.columns:
     t5 = top5[['caption', 'reach', 'predicted_reach', 'virality_score']].copy()
     t5['reach'] = t5['reach'].apply(fmt)
