@@ -4,155 +4,143 @@ import numpy as np
 from sklearn.linear_model import LinearRegression
 import openai
 
+# Page config
 st.set_page_config(page_title="Reels Reach Predictor", layout="wide")
 st.title("📊 Instagram Reels Performance Dashboard")
 
-# --- Load historical data ---
+# --- Load and preprocess data ---
 df = pd.read_csv("posts_zero1byzerodha.csv")
 df.columns = df.columns.str.strip().str.lower()
-df = df[df['type'].str.lower() == 'reel']
-model = None
 
-# --- Clean numeric columns ---
+# Filter only Reels
+if 'type' in df.columns:
+    df = df[df['type'].str.lower() == 'reel']
+
+# Clean numeric fields
 for col in ['reach', 'likes', 'comments', 'shares', 'saved']:
     if col in df.columns:
-        df[col] = (
-            df[col]
-            .astype(str)
-            .str.replace(r'[^\d.]', '', regex=True)
-            .replace('', np.nan)
-            .astype(float)
-        )
+        df[col] = (df[col].astype(str)
+                        .str.replace(r'[^\d.]', '', regex=True)
+                        .replace('', np.nan))
+        df[col] = pd.to_numeric(df[col], errors='coerce')
 
-# --- Parse and filter by date ---
-if 'date' in df.columns:
-    df['date'] = pd.to_datetime(df['date'], errors='coerce')
-    df = df.dropna(subset=['date'])
-    try:
-        df['date'] = pd.to_datetime(df['date']).dt.tz_localize('Asia/Kolkata', ambiguous='NaT', nonexistent='NaT')
-    except Exception:
-        try:
-            df['date'] = df['date'].dt.tz_convert('Asia/Kolkata')
-        except Exception:
-            pass
+# Identify date column and filter
+date_col = next((c for c in df.columns if 'date' in c), None)
+if date_col:
+    df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+    df = df.dropna(subset=[date_col])
+    df['post_date'] = df[date_col].dt.date
+    st.sidebar.subheader("📅 Filter by Post Date")
+    start_date, end_date = st.sidebar.date_input(
+        "Select date range", [df['post_date'].min(), df['post_date'].max()]
+    )
+    df = df[df['post_date'].between(start_date, end_date)]
 
-    min_date, max_date = df['date'].min().date(), df['date'].max().date()
-    start_date, end_date = st.date_input("Select Date Range", [min_date, max_date])
+# Features for modeling
+features = [f for f in ['shares','saved','comments','likes'] if f in df.columns]
 
-    start_date = pd.Timestamp(start_date).tz_localize("Asia/Kolkata")
-    end_date = pd.Timestamp(end_date).tz_localize("Asia/Kolkata")
-    df = df[(df['date'] >= start_date) & (df['date'] <= end_date)]
-
-# --- Train model ---
-X = df[['shares', 'saved', 'comments', 'likes']]
-y = df['reach']
+# Train Linear Regression model
+y = df['reach'].fillna(0)
+X = df[features].fillna(0)
 model = LinearRegression().fit(X, y)
 df['predicted_reach'] = model.predict(X)
 
-# --- Categorize performance ---
-def categorize(row):
-    ratio = row['reach'] / row['predicted_reach'] if row['predicted_reach'] else 0
+# Categorize performance
+def categorize(r, p):
+    if p == 0:
+        return 'Uncategorized'
+    ratio = r / p
     if ratio > 2.0:
-        return "Viral"
-    elif ratio > 1.5:
-        return "Excellent"
-    elif ratio > 1.0:
-        return "Good"
-    elif ratio > 0.5:
-        return "Average"
-    else:
-        return "Poor"
+        return 'Viral'
+    if ratio > 1.5:
+        return 'Excellent'
+    if ratio > 1.0:
+        return 'Good'
+    if ratio > 0.5:
+        return 'Average'
+    return 'Poor'
 
-df['performance'] = df.apply(categorize, axis=1)
+df['performance'] = df.apply(lambda row: categorize(row['reach'], row['predicted_reach']), axis=1)
 
-# --- Format numbers ---
-def format_number(n):
-    if n >= 1_000_000:
-        return f"{n/1_000_000:.2f}M"
-    elif n >= 1_000:
-        return f"{n/1_000:.1f}K"
+# Number formatting
+def fmt(n):
+    if pd.isna(n):
+        return "-"
+    if n >= 1e6:
+        return f"{n/1e6:.2f}M"
+    if n >= 1e3:
+        return f"{n/1e3:.1f}K"
     return str(int(n))
 
 # --- Summary Metrics ---
 st.subheader("📈 Summary Insights")
 col1, col2, col3 = st.columns(3)
-col1.metric("Avg Actual Reach", format_number(df['reach'].mean()))
-col2.metric("Avg Predicted Reach", format_number(df['predicted_reach'].mean()))
-error = np.mean(np.abs((df['reach'] - df['predicted_reach']) / df['predicted_reach']) * 100)
-col3.metric("Mean % Error", f"{error:.2f}%")
+avg_act = df['reach'].mean()
+avg_pred = df['predicted_reach'].mean()
+mean_err = np.mean(np.abs((df['reach'] - df['predicted_reach']) / np.where(df['predicted_reach']==0,1,df['predicted_reach']))) * 100
+col1.metric("Avg Actual Reach", fmt(avg_act))
+col2.metric("Avg Predicted Reach", fmt(avg_pred))
+col3.metric("Mean % Error", f"{mean_err:.2f}%")
 
 with st.expander("🧠 Why is the error high?"):
-    st.markdown("- Viral outliers (e.g., collab posts) disproportionately inflate error.")
-    st.markdown("- Linear regression assumes linearity. Real reach may depend on more complex, nonlinear factors.")
-    st.markdown("- Some reels may benefit from timing, trending audio, or influencer effects not captured by likes/saves alone.")
+    st.markdown("- Collab or outlier posts can skew averages.")
+    st.markdown("- Linear model may not capture nonlinear trends.")
+    st.markdown("- Factors like audio, timing, and hashtags are not included.")
 
-# --- Top Reels ---
+# --- Viral & Excellent Reels ---
 st.subheader("🔥 Viral & Excellent Reels")
-display_df = df[df['performance'].isin(['Viral', 'Excellent'])].copy()
-display_df['reach'] = display_df['reach'].apply(format_number)
-display_df['predicted_reach'] = display_df['predicted_reach'].apply(format_number)
-if 'date' in display_df.columns:
-    st.dataframe(display_df[['date', 'caption', 'reach', 'predicted_reach', 'performance']].sort_values(by='reach', ascending=False))
+ve = df[df['performance'].isin(['Viral','Excellent'])]
+if not ve.empty:
+    ve_display = ve[['post_date'] + features + ['reach','predicted_reach','performance']].copy()
+    ve_display['reach'] = ve_display['reach'].apply(fmt)
+    ve_display['predicted_reach'] = ve_display['predicted_reach'].apply(fmt)
+    ve_display = ve_display.rename(columns={
+        'post_date':'Date', 'reach':'Reach', 'predicted_reach':'Predicted Reach', 'performance':'Performance'
+    })
+    st.dataframe(ve_display.sort_values('Reach', ascending=False))
+else:
+    st.write("No Viral or Excellent reels in this range.")
 
-# --- Content-Based Insights ---
+# --- Content Intelligence (NLP) ---
 openai.api_key = st.secrets.get("OPENAI_API_KEY", "")
-if 'caption' in df.columns and len(df) > 0:
+if 'caption' in df.columns and not df['caption'].dropna().empty:
     st.subheader("🧠 Content Intelligence")
-    sample_titles = df['caption'].dropna().sample(min(5, len(df))).tolist()
-    prompt = f"""
-You are an Instagram Reels strategist. Based on these 5 reel titles:
-
-{chr(10).join(['- ' + t for t in sample_titles])}
-
-Give 3 bullet points:
-1. Common content patterns or themes
-2. Predicted tone or emotion (e.g. fun, serious, educational)
-3. One idea to improve virality based on this sample
-"""
+    sample_captions = df['caption'].dropna().sample(min(5, len(df))).tolist()
+    prompt = "You are an Instagram strategist. Analyze these captions for patterns and tone:\n" + "\n".join(sample_captions)
     try:
-        response = openai.ChatCompletion.create(
+        resp = openai.ChatCompletion.create(
             model="gpt-4",
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role":"user","content":prompt}]
         )
-        st.markdown(response['choices'][0]['message']['content'])
-    except Exception as e:
-        st.warning("NLP analysis unavailable.")
+        st.markdown(resp.choices[0].message.content)
+    except Exception:
+        st.warning("Content insights unavailable.")
 
 # --- Virality Score ---
-df['virality_score'] = df['reach'] / df['predicted_reach']
-df['virality_score'] = df['virality_score'].replace([np.inf, -np.inf], np.nan).fillna(0)
+st.subheader("📊 Top Content by Virality Score")
+df['virality_score'] = df['reach']/np.where(df['predicted_reach']==0, np.nan, df['predicted_reach'])
+df['virality_score'] = df['virality_score'].replace([np.inf,-np.inf], np.nan).fillna(0)
 
-st.subheader("📊 Top Content Ideas by Virality")
-top_ideas = df.sort_values(by='virality_score', ascending=False).head(5)
-top_ideas['reach'] = top_ideas['reach'].apply(format_number)
-top_ideas['predicted_reach'] = top_ideas['predicted_reach'].apply(format_number)
-top_ideas['virality_score'] = top_ideas['virality_score'].apply(lambda x: f"{x:.2f}x")
-st.dataframe(top_ideas[['caption', 'reach', 'predicted_reach', 'virality_score']])
+top5 = df.sort_values('virality_score', ascending=False).head(5)
+top5_display = top5[['caption','reach','predicted_reach','virality_score']].copy()
+top5_display['reach'] = top5_display['reach'].apply(fmt)
+top5_display['predicted_reach'] = top5_display['predicted_reach'].apply(fmt)
+top5_display['virality_score'] = top5_display['virality_score'].apply(lambda x: f"{x:.2f}x")
+top5_display = top5_display.rename(columns={
+    'caption':'Caption','reach':'Reach','predicted_reach':'Predicted Reach','virality_score':'Virality Score'
+})
+st.dataframe(top5_display)
 
-# --- Export CSV ---
-st.subheader("⬇️ Download Categorized Data")
-csv = df.to_csv(index=False).encode('utf-8')
-st.download_button("Download CSV", csv, "reels_with_predictions.csv", "text/csv")
+# --- Download Data ---
+st.subheader("⬇️ Download Data")
+st.download_button("Download CSV", df.to_csv(index=False).encode('utf-8'), "reels_data.csv", "text/csv")
 
-# --- Predict New Reel ---
+# --- Predict New Reel Reach ---
 st.subheader("🎯 Predict Reach for New Reel")
-st.markdown("⚠️ Predictions require inputs after reel is live.")
 with st.form("predict_form"):
-    shares = st.number_input("Shares", min_value=0, value=0)
-    saves = st.number_input("Saves", min_value=0, value=0)
-    comments = st.number_input("Comments", min_value=0, value=0)
-    likes = st.number_input("Likes", min_value=0, value=0)
+    inputs = {f: st.number_input(f.capitalize(), 0, value=0) for f in features}
     submit = st.form_submit_button("Predict Reach")
-
 if submit:
-    if model is not None:
-        X_new = pd.DataFrame([{
-            'shares': shares,
-            'saved': saves,
-            'comments': comments,
-            'likes': likes
-        }])
-        prediction = model.predict(X_new)[0]
-        st.success(f"📢 Predicted Reach: {format_number(prediction)}")
-    else:
-        st.warning("Model not trained.")
+    Xn = pd.DataFrame([inputs])
+    pred = model.predict(Xn)[0]
+    st.success(f"Predicted Reach: {fmt(pred)}")
