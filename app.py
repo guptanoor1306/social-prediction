@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from sklearn.linear_model import LinearRegression
 import openai
 
 # Page configuration
@@ -20,9 +19,10 @@ if 'type' in df.columns:
 for col in ['reach', 'likes', 'comments', 'shares', 'saved']:
     if col in df.columns:
         df[col] = (
-            df[col].astype(str)
-                  .str.replace(r'[^\d.]', '', regex=True)
-                  .replace('', np.nan)
+            df[col]
+            .astype(str)
+            .str.replace(r'[^\d.]', '', regex=True)
+            .replace('', np.nan)
         )
         df[col] = pd.to_numeric(df[col], errors='coerce')
 
@@ -38,7 +38,6 @@ if date_col:
         "Select date range",
         [df['post_date'].min(), df['post_date'].max()]
     )
-    # handle single vs range
     if isinstance(dates, (list, tuple)) and len(dates) == 2:
         start_date, end_date = dates
     else:
@@ -47,74 +46,100 @@ if date_col:
 else:
     st.sidebar.info("No date column found for filtering.")
 
-# --- Train model & make predictions ---
-features = [f for f in ['shares', 'saved', 'comments', 'likes'] if f in df.columns]
-X = df[features].fillna(0)
-y = df['reach'].fillna(0)
-model = LinearRegression().fit(X, y)
-df['predicted_reach'] = model.predict(X)
+# --- Prediction via normalized impact weights ---
+# Raw impact weights: Shares=10, Saves=5, Comments=3, Likes=2
+raw_weights = {'shares': 10, 'saved': 5, 'comments': 3, 'likes': 2}
+total_w = sum(raw_weights.values())
+weights = {k: v / total_w for k, v in raw_weights.items()}
+
+# Ensure columns exist
+for col in weights:
+    if col not in df.columns:
+        df[col] = 0
+
+# Compute weighted-sum reach prediction
+df['predicted_reach'] = (
+    df['shares']   * weights['shares'] +
+    df['saved']    * weights['saved'] +
+    df['comments'] * weights['comments'] +
+    df['likes']    * weights['likes']
+)
 
 # --- Categorize performance ---
-def categorize(r, p):
-    if p == 0:
+def categorize(actual, pred):
+    if pred == 0:
         return 'Uncategorized'
-    ratio = r / p
-    if ratio > 2.0:    return 'Viral'
-    if ratio > 1.5:    return 'Excellent'
-    if ratio > 1.0:    return 'Good'
-    if ratio > 0.5:    return 'Average'
+    ratio = actual / pred
+    if ratio > 2.0:
+        return 'Viral'
+    if ratio > 1.5:
+        return 'Excellent'
+    if ratio > 1.0:
+        return 'Good'
+    if ratio > 0.5:
+        return 'Average'
     return 'Poor'
 
-df['performance'] = df.apply(lambda row: categorize(row['reach'], row['predicted_reach']), axis=1)
+df['performance'] = df.apply(lambda r: categorize(r['reach'], r['predicted_reach']), axis=1)
 
-# --- Number formatting ---
-def fmt(n):
-    if pd.isna(n):  return "-"
-    if n >= 1e6:    return f"{n/1e6:.2f}M"
-    if n >= 1e3:    return f"{n/1e3:.1f}K"
-    return str(int(n))
+# --- Number formatting helper ---
+def fmt(x):
+    if pd.isna(x):
+        return "-"
+    if x >= 1e6:
+        return f"{x/1e6:.2f}M"
+    if x >= 1e3:
+        return f"{x/1e3:.1f}K"
+    return str(int(x))
 
-# --- Select Viral & Excellent subset for summary totals ---
+# --- Viral & Excellent subset for summaries ---
 ve = df[df['performance'].isin(['Viral', 'Excellent'])]
 
 # --- Summary Metrics (Viral & Excellent Totals) ---
 st.subheader("📈 Summary Insights (Viral & Excellent Totals)")
-col1, col2, col3 = st.columns(3)
+c1, c2, c3 = st.columns(3)
 total_act = ve['reach'].sum()
 total_pred = ve['predicted_reach'].sum()
-deviation = abs(total_act - total_pred) / total_pred * 100 if total_pred else 0
+deviation = (abs(total_act - total_pred) / total_pred * 100) if total_pred else 0
 
-col1.metric("Total Actual Reach", fmt(total_act))
-col2.metric("Total Predicted Reach", fmt(total_pred))
-col3.metric("Deviation %", f"{deviation:.2f}%")
+c1.metric("Total Actual Reach", fmt(total_act))
+c2.metric("Total Predicted Reach", fmt(total_pred))
+c3.metric("Deviation %", f"{deviation:.2f}%")
 
 with st.expander("🧠 Why is the deviation high?"):
-    st.markdown("- Outlier and collab reels can skew totals.")
-    st.markdown("- The linear model may under/over estimate extremes.")
-    st.markdown("- Analysis limited to Viral & Excellent subset.")
+    st.markdown("- Weights are fixed, not trained on this dataset.")
+    st.markdown("- Collab/outlier reels can skew totals.")
+    st.markdown("- Only Viral & Excellent subset is summarized here.")
 
 # --- Viral & Excellent Reels Table ---
 st.subheader("🔥 Viral & Excellent Reels")
 if not ve.empty:
-    ve_display = ve.copy()
-    display_cols = ['post_date', 'caption'] + features + ['reach', 'predicted_reach', 'performance']
-    ve_display = ve_display[[c for c in display_cols if c in ve_display.columns]]
-    ve_display['reach'] = ve_display['reach'].apply(fmt)
-    ve_display['predicted_reach'] = ve_display['predicted_reach'].apply(fmt)
-    ve_display = ve_display.rename(columns={
-        'post_date':       'Date',
-        'caption':         'Caption',
-        'reach':           'Reach',
+    disp = ve.copy()
+    columns = [
+        'post_date', 'caption', 'shares', 'saved',
+        'comments', 'likes', 'reach', 'predicted_reach', 'performance'
+    ]
+    disp = disp[[c for c in columns if c in disp.columns]]
+    disp['reach'] = disp['reach'].apply(fmt)
+    disp['predicted_reach'] = disp['predicted_reach'].apply(fmt)
+    disp = disp.rename(columns={
+        'post_date': 'Date',
+        'caption': 'Caption',
+        'shares': 'Shares',
+        'saved': 'Saves',
+        'comments': 'Comments',
+        'likes': 'Likes',
+        'reach': 'Reach',
         'predicted_reach': 'Predicted Reach',
-        'performance':     'Performance'
+        'performance': 'Performance'
     })
     try:
-        styled = ve_display.style.set_properties(
+        styled = disp.style.set_properties(
             subset=['Caption'], **{'white-space': 'pre-wrap'}
         )
         st.dataframe(styled, use_container_width=True)
     except:
-        st.dataframe(ve_display.sort_values('Reach', ascending=False), use_container_width=True)
+        st.dataframe(disp, use_container_width=True)
 else:
     st.write("No Viral or Excellent reels in this range.")
 
@@ -122,21 +147,21 @@ else:
 st.subheader("🧠 Content Intelligence (NLP)")
 api_key = st.secrets.get("OPENAI_API_KEY") or st.secrets.get("general", {}).get("OPENAI_API_KEY")
 if not api_key:
-    st.warning("🛑 Add OPENAI_API_KEY to Streamlit secrets.")
+    st.warning("🛑 OPENAI_API_KEY not found in Streamlit secrets.")
 else:
     client = openai.OpenAI(api_key=api_key)
     text_col = 'caption' if 'caption' in df.columns else ('title' if 'title' in df.columns else None)
     if not text_col:
-        st.info("No 'caption' or 'title' column for NLP.")
+        st.info("No 'caption' or 'title' column available for NLP analysis.")
     else:
         texts = df[text_col].dropna().astype(str)
         if texts.empty:
             st.info(f"No data in '{text_col}'.")
         else:
-            sample_texts = texts.sample(min(5, len(texts))).tolist()
+            sample = texts.sample(min(5, len(texts))).tolist()
             prompt = (
                 f"You are an Instagram strategist. Analyze these {text_col}s for patterns, themes, and tone:\n"
-                + "\n".join(sample_texts)
+                + "\n".join(sample)
             )
             try:
                 resp = client.chat.completions.create(
@@ -147,11 +172,11 @@ else:
             except Exception as e:
                 st.error(f"🛑 NLP analysis error: {e}")
 
-# --- Virality Score ---
+# --- Virality Score Ranking ---
 st.subheader("📊 Top Content by Virality Score")
 df['virality_score'] = df['reach'] / np.where(df['predicted_reach'] == 0, np.nan, df['predicted_reach'])
 df['virality_score'] = df['virality_score'].replace([np.inf, -np.inf], np.nan).fillna(0)
-top5 = df.sort_values('virality_score', ascending=False).head(5)
+top5 = df.nlargest(5, 'virality_score')
 if 'caption' in top5.columns:
     t5 = top5[['caption', 'reach', 'predicted_reach', 'virality_score']].copy()
     t5['reach'] = t5['reach'].apply(fmt)
@@ -165,26 +190,40 @@ if 'caption' in top5.columns:
     })
     st.dataframe(t5, use_container_width=True)
 else:
-    st.write("No captions available for Virality Score table.")
+    st.write("No captions available for virality ranking.")
 
 # --- Strategic Takeaways ---
 st.subheader("🚀 Strategic Takeaways")
 st.markdown("""
-- **Collabs drive outsized totals:** Partner reels skew totals higher.
-- **Model limitations at extremes:** Very high‐reach reels may be underpredicted.
-- **Focus your Viral & Excellent content patterns.**
+- **Shares carry the most weight (10/20)** in our model, so maximize shareable hooks.
+- **Saves (5/20)** indicate evergreen value—create content worth revisiting.
+- **Comments (3/20)** drive conversation—use questions or prompts.
+- **Likes (2/20)** still matter for social proof.
 """)
 
-# --- Download Data ---
-st.subheader("⬇️ Download Data")
-st.download_button("Download CSV", df.to_csv(index=False).encode('utf-8'), "reels_data.csv", "text/csv")
+# --- Download Full Data ---
+st.subheader("⬇️ Download Full Data")
+st.download_button(
+    "Download CSV",
+    df.to_csv(index=False).encode('utf-8'),
+    "reels_with_predictions.csv",
+    mime="text/csv"
+)
 
-# --- Predict New Reel Reach ---
-st.subheader("🎯 Predict Reach for New Reel")
+# --- Predict Reach for a New Reel ---
+st.subheader("🎯 Predict Reach for New Reel (Pre‑launch)")
+st.markdown("Inputs use the same 10:5:3:2 weighting model.")
 with st.form("predict_form"):
-    inputs = {f: st.number_input(f.capitalize(), 0, value=0) for f in features}
-    submitted = st.form_submit_button("Predict Reach")
+    s = st.number_input("Shares",   min_value=0, value=0)
+    sv = st.number_input("Saves",   min_value=0, value=0)
+    c = st.number_input("Comments", min_value=0, value=0)
+    l = st.number_input("Likes",    min_value=0, value=0)
+    submitted = st.form_submit_button("Predict")
 if submitted:
-    Xn = pd.DataFrame([inputs])
-    pred = model.predict(Xn)[0]
-    st.success(f"Predicted Reach: {fmt(pred)}")
+    pred = (
+        s * weights['shares'] +
+        sv * weights['saved'] +
+        c * weights['comments'] +
+        l * weights['likes']
+    )
+    st.success(f"📢 Predicted Reach: {fmt(pred)}")
