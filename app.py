@@ -77,23 +77,21 @@ def fmt(n):
         return f"{n/1e3:.1f}K"
     return str(int(n))
 
-# --- Summary Metrics ---
+# --- Summary Metrics (Restored) ---
 st.subheader("📈 Summary Insights")
 col1, col2, col3 = st.columns(3)
 avg_act = df['reach'].mean()
-y_true = df['reach'].fillna(0)
-y_pred = df['predicted_reach']
-r2 = r2_score(y_true, y_pred)
-
-# Compute RMSE manually for compatibility
-mse = mean_squared_error(y_true, y_pred)
-rmse = np.sqrt(mse)
+avg_pred = df['predicted_reach'].mean()
+mean_err = np.mean(
+    np.abs((df['reach'] - df['predicted_reach']) /
+           np.where(df['predicted_reach'] == 0, 1, df['predicted_reach']))
+) * 100
 
 col1.metric("Avg Actual Reach", fmt(avg_act))
-col2.metric("Model R² Score", f"{r2:.2f}")
-col3.metric("Model RMSE", fmt(rmse))
+col2.metric("Avg Predicted Reach", fmt(avg_pred))
+col3.metric("Mean % Error", f"{mean_err:.2f}%")
 
-with st.expander("🧠 Why is the model error high?"):
+with st.expander("🧠 Why is the error high?"):
     st.markdown("- Collab or outlier posts can skew predictions.")
     st.markdown("- Linear regression may not capture nonlinear influencer effects.")
     st.markdown("- Factors like audio trends, timing, and hashtags aren’t model inputs.")
@@ -114,7 +112,7 @@ if not ve.empty:
         'predicted_reach': 'Predicted Reach',
         'performance': 'Performance'
     })
-    # Wrap caption text for visibility
+    # Wrap caption text
     try:
         styled = ve_display.style.set_properties(
             subset=['Caption'], **{'white-space': 'pre-wrap'}
