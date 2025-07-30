@@ -29,11 +29,10 @@ for col in ['reach', 'likes', 'comments', 'shares', 'saved']:
 if 'date' in df.columns:
     df['date'] = pd.to_datetime(df['date'], errors='coerce')
     df = df.dropna(subset=['date'])
-    if pd.api.types.is_datetime64_any_dtype(df['date']):
-        if df['date'].dt.tz is None:
-            df['date'] = df['date'].dt.tz_localize('Asia/Kolkata')
-        else:
-            df['date'] = df['date'].dt.tz_convert('Asia/Kolkata')
+    if not df['date'].dt.tz:
+        df['date'] = df['date'].dt.tz_localize('Asia/Kolkata', ambiguous='NaT', nonexistent='NaT')
+    else:
+        df['date'] = df['date'].dt.tz_convert('Asia/Kolkata')
 
     min_date, max_date = df['date'].min().date(), df['date'].max().date()
     start_date, end_date = st.date_input("Select Date Range", [min_date, max_date])
@@ -90,7 +89,8 @@ st.subheader("🔥 Viral & Excellent Reels")
 display_df = df[df['performance'].isin(['Viral', 'Excellent'])].copy()
 display_df['reach'] = display_df['reach'].apply(format_number)
 display_df['predicted_reach'] = display_df['predicted_reach'].apply(format_number)
-st.dataframe(display_df[['date', 'caption', 'reach', 'predicted_reach', 'performance']].sort_values(by='reach', ascending=False))
+if 'date' in display_df.columns:
+    st.dataframe(display_df[['date', 'caption', 'reach', 'predicted_reach', 'performance']].sort_values(by='reach', ascending=False))
 
 # --- Content-Based Insights ---
 openai.api_key = st.secrets.get("OPENAI_API_KEY", "")
