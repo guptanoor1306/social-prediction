@@ -216,41 +216,32 @@ st.write("**Correlation Matrix by Performance Category:**")
 corr_display = corr_by_cat.round(3)
 st.dataframe(corr_display)
 
-# Create ONE combined chart with all categories
+# Create the original format chart - engagement metrics on X-axis, categories as different colors
 corr_viz = corr_by_cat.dropna(axis=1, how='all')
 if not corr_viz.empty:
-    st.write("**Correlation Visualization:**")
+    # Convert to the format the original chart expects
+    corr_src = (
+        corr_viz
+         .reset_index()
+         .melt('index', var_name='Category', value_name='Correlation')
+         .rename(columns={'index':'Engagement'})
+         .dropna(subset=['Correlation'])
+    )
     
-    # Reshape data for combined chart
-    corr_data = {}
-    for metric in corr_viz.index:
-        corr_data[metric] = corr_viz.loc[metric].dropna().to_dict()
-    
-    # Create one chart with all categories
-    if corr_data:
-        # Convert to format suitable for grouped bar chart
-        chart_data = []
-        for metric in corr_data:
-            for category, correlation in corr_data[metric].items():
-                chart_data.append({
-                    'Metric': metric,
-                    'Category': category, 
-                    'Correlation': correlation
-                })
-        
-        if chart_data:
-            chart_df = pd.DataFrame(chart_data)
-            
-            # Use Altair for grouped bar chart
-            chart = alt.Chart(chart_df).mark_bar().encode(
-                x=alt.X('Metric:N', title='Engagement Metric'),
-                y=alt.Y('Correlation:Q', scale=alt.Scale(domain=[-1, 1])),
-                color=alt.Color('Category:N', title='Performance Category'),
-                column=alt.Column('Metric:N', title=''),
-                tooltip=['Metric', 'Category', 'Correlation']
-            ).resolve_scale(x='independent').properties(width=120, height=300)
-            
-            st.altair_chart(chart, use_container_width=True)
+    if not corr_src.empty:
+        chart = (
+            alt.Chart(corr_src)
+               .mark_bar()
+               .encode(
+                   x=alt.X('Engagement:N', title='Engagement Metric'),
+                   xOffset='Category:N',
+                   y=alt.Y('Correlation:Q', scale=alt.Scale(domain=[-1, 1])),
+                   color='Category:N',
+                   tooltip=['Engagement', 'Category', alt.Tooltip('Correlation:Q', format='.3f')]
+               )
+               .properties(width='container', height=300)
+        )
+        st.altair_chart(chart, use_container_width=True)
             
     st.info("**Note:** Negative correlations may indicate controversial content that generates discussion but doesn't always boost reach algorithmically.")
 
