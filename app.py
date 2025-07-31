@@ -50,12 +50,7 @@ df_full['performance_full'] = df_full.apply(
 cats = ['Viral','Excellent','Good','Average','Poor']
 corr_by_cat = pd.DataFrame(index=features, columns=cats)
 
-# Show category distribution
-st.sidebar.write("**Category Distribution:**")
-cat_counts = df_full['performance_full'].value_counts()
-for cat in cats:
-    count = cat_counts.get(cat, 0)
-    st.sidebar.write(f"{cat}: {count}")
+# Category distribution removed as requested
 
 # Calculate correlations for each category (lowered threshold to 3 minimum posts)
 for cat in cats:
@@ -118,38 +113,46 @@ def fmt(n):
 # ── 9) SUMMARY INSIGHTS: ALL POSTS (FIXED) ───────────────────────────────────
 st.subheader("📈 Summary Insights (All Categories)")
 
-# Calculate separate totals - this was the main issue!
-total_actual = df['reach'].sum()
-total_predicted = df['predicted_reach'].sum()
+# Show individual post performance instead of misleading totals
+total_posts = len(df)
+avg_actual = df['reach'].mean()
+avg_predicted = df['predicted_reach'].mean()
 mae = np.mean(np.abs(df['reach'] - df['predicted_reach']))
-mape = np.mean(np.abs((df['reach'] - df['predicted_reach']) / np.where(df['reach']==0, 1, df['reach']))) * 100
 
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("Total Actual Reach", fmt(total_actual))
-c2.metric("Total Predicted Reach", fmt(total_predicted))
-c3.metric("Mean Absolute Error", fmt(mae))
+c1.metric("Total Posts", str(total_posts))
+c2.metric("Avg Actual Reach", fmt(avg_actual))
+c3.metric("Avg Predicted Reach", fmt(avg_predicted))
 c4.metric("Model R² Score", f"{r2:.3f}")
+
+# Explain the "Poor" category
+poor_count = len(df[df['performance'] == 'Poor'])
+poor_pct = (poor_count / total_posts) * 100 if total_posts > 0 else 0
+
+if poor_pct > 30:  # If more than 30% are "Poor"
+    st.warning(f"⚠️ **{poor_count} posts ({poor_pct:.1f}%) are in 'Poor' category** - these posts underperformed compared to their predicted reach based on engagement metrics. This suggests external factors (timing, trends, hashtags) significantly impact performance.")
 
 # ── 10) SUMMARY INSIGHTS: VIRAL & EXCELLENT (FIXED) ──────────────────────────
 st.subheader("📈 Summary Insights (Viral & Excellent)")
 ve = df[df['performance'].isin(['Viral','Excellent'])]
 
 if not ve.empty:
-    ve_actual = ve['reach'].sum()
-    ve_predicted = ve['predicted_reach'].sum()
-    ve_mae = np.mean(np.abs(ve['reach'] - ve['predicted_reach']))
-    ve_deviation = (abs(ve_actual - ve_predicted) / ve_predicted * 100) if ve_predicted > 0 else 0
+    ve_count = len(ve)
+    ve_pct = (ve_count / len(df)) * 100
+    ve_avg_actual = ve['reach'].mean()
+    ve_avg_predicted = ve['predicted_reach'].mean()
+    avg_virality = (ve['reach'] / ve['predicted_reach']).mean()
     
     c5, c6, c7, c8 = st.columns(4)
-    c5.metric("Total Actual Reach", fmt(ve_actual))
-    c6.metric("Total Predicted Reach", fmt(ve_predicted))
-    c7.metric("Mean Absolute Error", fmt(ve_mae))
-    c8.metric("Deviation %", f"{ve_deviation:.2f}%")
+    c5.metric("V&E Posts", f"{ve_count} ({ve_pct:.1f}%)")
+    c6.metric("Avg Actual Reach", fmt(ve_avg_actual))
+    c7.metric("Avg Predicted Reach", fmt(ve_avg_predicted))
+    c8.metric("Avg Virality Ratio", f"{avg_virality:.2f}x")
     
-    with st.expander("🧠 Why is the deviation high?"):
-        st.markdown("- Viral/Excellent reels often have outlier characteristics")
-        st.markdown("- Linear regression may under-estimate viral content")
-        st.markdown("- Collaborations and trending factors not captured in model")
+    with st.expander("🧠 Understanding High Performance"):
+        st.markdown("- **Viral & Excellent** posts significantly outperform predictions")
+        st.markdown("- These posts likely benefited from trending topics, optimal timing, or algorithmic boosts")
+        st.markdown("- Focus on replicating patterns from these high-performers")
 else:
     st.write("No Viral/Excellent reels in this date range.")
 
@@ -234,10 +237,7 @@ if not corr_viz.empty:
         # Explanation of negative correlations
         st.info("**Note:** Negative correlations (like comments) may indicate controversial content that generates discussion but doesn't always boost reach algorithmically.")
 
-# ── 15) OVERALL ENGAGEMENT CORRELATION ───────────────────────────────────────
-st.subheader("🔗 Overall Engagement Correlation with Reach")
-overall_corr = df[features + ['reach']].corr()['reach'].drop('reach')
-st.bar_chart(overall_corr)
+# Remove overall correlation section since we have category-wise above
 
 # ── 16) TOP VIRAL CONTENT ────────────────────────────────────────────────────
 st.subheader("📈 Top Content by Virality Score")
