@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.linear_model import LinearRegression
+import altair as alt
 import openai
 
 # ── Page config ───────────────────────────────────────────────────────────────
@@ -51,37 +52,37 @@ df['predicted_reach'] = model.predict(X)
 
 # ── Categorize performance ────────────────────────────────────────────────────
 def categorize(actual, pred):
-    if pred <= 0: return 'Poor'
+    if pred <= 0:       return 'Poor'
     r = actual / pred
-    if r > 2.0:    return 'Viral'
-    if r > 1.5:    return 'Excellent'
-    if r > 1.0:    return 'Good'
-    if r > 0.5:    return 'Average'
+    if r > 2.0:         return 'Viral'
+    if r > 1.5:         return 'Excellent'
+    if r > 1.0:         return 'Good'
+    if r > 0.5:         return 'Average'
     return 'Poor'
 
 df['performance'] = df.apply(lambda r: categorize(r['reach'], r['predicted_reach']), axis=1)
 ve = df[df['performance'].isin(['Viral','Excellent'])]
 
-# ── Remove super‐outliers ───────────────────────────────────────────────────────
+# ── Remove super-outliers ─────────────────────────────────────────────────────
 df_no = df.copy()
 for f in features + ['reach']:
     if f in df_no.columns:
         low, high = df_no[f].quantile([0.01, 0.99])
         df_no = df_no[df_no[f].between(low, high)]
 
-# ── Compute overall & per‐category correlations ───────────────────────────────
+# ── Compute overall & per-category correlations ───────────────────────────────
 corr_overall = df_no[features + ['reach']].corr()['reach'].drop('reach').sort_values(ascending=False)
 
-cats = ['Poor','Average','Good','Excellent','Viral']
+cats = ['Viral','Excellent','Good','Average','Poor']
 corr_by_cat = pd.DataFrame(index=features, columns=cats)
 for cat in cats:
-    sub = df_no[df_no['performance'] == cat]
-    if len(sub) >= len(features):
-        corr_by_cat[cat] = sub[features + ['reach']].corr().loc['reach', features]
+    subset = df_no[df_no['performance'] == cat]
+    if len(subset) >= len(features):
+        corr_by_cat[cat] = subset[features + ['reach']].corr().loc['reach', features]
     else:
         corr_by_cat[cat] = np.nan
 
-# ── Formatting helper ──────────────────────────────────────────────────────────
+# ── Formatter ─────────────────────────────────────────────────────────────────
 def fmt(n):
     if pd.isna(n): return "-"
     if n >= 1e6:   return f"{n/1e6:.2f}M"
@@ -90,19 +91,19 @@ def fmt(n):
 
 # ── Summary Metrics ────────────────────────────────────────────────────────────
 st.subheader("📈 Summary Insights (Viral & Excellent Totals)")
-c1, c2, c3 = st.columns(3)
+col1, col2, col3 = st.columns(3)
 total_act = ve['reach'].sum()
 total_pr  = ve['predicted_reach'].sum()
 dev_pct   = (abs(total_act - total_pr) / total_pr * 100) if total_pr else 0
 
-c1.metric("Total Actual Reach",    fmt(total_act))
-c2.metric("Total Predicted Reach", fmt(total_pr))
-c3.metric("Deviation %",           f"{dev_pct:.2f}%")
+col1.metric("Total Actual Reach",    fmt(total_act))
+col2.metric("Total Predicted Reach", fmt(total_pr))
+col3.metric("Deviation %",           f"{dev_pct:.2f}%")
 
 with st.expander("🧠 Why is the deviation high?"):
-    st.markdown("- Outlier/collab reels skew totals.")
-    st.markdown("- Linear model under/over estimates extremes.")
-    st.markdown("- Only Viral & Excellent buckets are shown.")
+    st.markdown("- Collaborative/outlier posts skew totals")  
+    st.markdown("- Linear model under/over estimates extremes")  
+    st.markdown("- Only Viral & Excellent posts counted")
 
 # ── Viral & Excellent Reels Table ─────────────────────────────────────────────
 st.subheader("🔥 Viral & Excellent Reels")
@@ -117,8 +118,10 @@ if not ve.empty:
         'shares':'Shares','saved':'Saves','comments':'Comments','likes':'Likes',
         'reach':'Reach','predicted_reach':'Predicted Reach','performance':'Performance'
     })
-    st.dataframe(out.style.set_properties(subset=['Caption'], **{'white-space':'pre-wrap'}),
-                 use_container_width=True)
+    st.dataframe(
+        out.style.set_properties(subset=['Caption'], **{'white-space':'pre-wrap'}),
+        use_container_width=True
+    )
 else:
     st.write("No Viral or Excellent reels in this range.")
 
@@ -130,82 +133,95 @@ st.bar_chart(perf_counts)
 # ── Reach Trend Over Time ─────────────────────────────────────────────────────
 st.subheader("📈 Reach Trend Over Time")
 if 'post_date_dt' in df.columns:
-    weekly = (df.set_index('post_date_dt')
-                 .resample('W')[['reach','predicted_reach']]
-                 .mean()
-                 .rename(columns={'reach':'Actual Reach','predicted_reach':'Predicted Reach'}))
+    weekly = (
+        df.set_index('post_date_dt')
+          .resample('W')[['reach','predicted_reach']]
+          .mean()
+          .rename(columns={'reach':'Actual Reach','predicted_reach':'Predicted Reach'})
+    )
     st.line_chart(weekly)
 
 # ── Engagement Correlation by Category ────────────────────────────────────────
 st.subheader("🔗 Engagement Correlation by Category")
-# ensure correct order
-st.bar_chart(corr_by_cat[cats])
+# Prepare for grouped bar chart
+source = (
+    corr_by_cat
+    .reset_index()
+    .melt('index', var_name='Category', value_name='Correlation')
+    .rename(columns={'index':'Engagement'})
+)
+chart = (
+    alt.Chart(source)
+       .mark_bar()
+       .encode(
+           x=alt.X('Engagement:N', title='Engagement Metric'),
+           xOffset='Category:N',
+           y=alt.Y('Correlation:Q'),
+           color='Category:N'
+       )
+       .properties(width='container', height=300)
+)
+st.altair_chart(chart, use_container_width=True)
 
-# ── Content Intelligence (NLP) ─────────────────────────────────────────────────
-st.subheader("🧠 Content Intelligence (NLP)")
-api_key = (st.secrets.get("OPENAI_API_KEY") or
-           st.secrets.get("general", {}).get("OPENAI_API_KEY"))
-if api_key and any(col in df.columns for col in ['caption','title']):
+# ── Content Intelligence ───────────────────────────────────────────────────────
+st.subheader("🧠 Content Intelligence")
+api_key = (st.secrets.get("OPENAI_API_KEY")
+           or st.secrets.get("general",{}).get("OPENAI_API_KEY"))
+if api_key and 'caption' in df.columns:
     client = openai.OpenAI(api_key=api_key)
-    tc = 'caption' if 'caption' in df.columns else 'title'
-    texts = df[tc].dropna().astype(str)
-    if not texts.empty:
-        sample = texts.sample(min(5, len(texts))).tolist()
-        prompt = (f"You are an Instagram strategist. Analyze these {tc}s "
-                  f"for patterns, themes, and tone:\n" + "\n".join(sample))
-        try:
-            resp = client.chat.completions.create(
-                model="gpt-4", messages=[{"role":"user","content":prompt}]
-            )
-            st.markdown(resp.choices[0].message.content)
-        except Exception as e:
-            st.error(f"NLP error: {e}")
+    sample = df['caption'].dropna().astype(str).sample(min(5, len(df))).tolist()
+    prompt = (
+        "You are an Instagram strategist. Based on these 5 reel captions:\n\n" +
+        "\n".join(f"- {t}" for t in sample) +
+        "\n\nGive:\n"
+        "1. Common content patterns or themes\n"
+        "2. Predicted tone or emotion\n"
+        "3. One idea to improve virality\n"
+    )
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4", messages=[{"role":"user","content":prompt}]
+        )
+        st.markdown(resp.choices[0].message.content)
+    except Exception as e:
+        st.error(f"NLP error: {e}")
 else:
-    st.warning("Add OPENAI_API_KEY to secrets and ensure a caption/title column exists.")
-
-# ── Top 5 by Virality Score ────────────────────────────────────────────────────
-st.subheader("📈 Top Content by Virality Score")
-df['virality_score'] = (df['reach'] /
-    np.where(df['predicted_reach']==0, np.nan, df['predicted_reach']))
-df['virality_score'] = df['virality_score'].replace([np.inf,-np.inf], np.nan).fillna(0)
-top5 = df.nlargest(5, 'virality_score')
-if 'caption' in top5.columns:
-    t5 = top5[['caption','reach','predicted_reach','virality_score']].copy()
-    t5['reach']           = t5['reach'].apply(fmt)
-    t5['predicted_reach'] = t5['predicted_reach'].apply(fmt)
-    t5['virality_score']  = t5['virality_score'].apply(lambda x: f"{x:.2f}x")
-    t5 = t5.rename(columns={
-        'caption':'Caption','reach':'Reach',
-        'predicted_reach':'Predicted Reach','virality_score':'Virality Score'
-    })
-    st.dataframe(t5, use_container_width=True)
+    st.info("Add OPENAI_API_KEY in Streamlit secrets to enable Content Intelligence.")
 
 # ── Strategic Takeaways ───────────────────────────────────────────────────────
 st.subheader("🚀 Strategic Takeaways")
-st.markdown(f"""
-1. **Shares** have highest overall correlation (r={corr_overall['shares']:.2f}).  
-2. **Correlations vary by category**—use the above chart to tailor your focus.  
-3. **If engagements are all strong but reach still lags**, revisit your hook/creative.
+st.markdown("""
+1. **Double-down on saveable “how-to” tips** – high saves drive long-term reach.  
+2. **Drive share prompts** (“tag a friend”) for algorithmic uplift.  
+3. **Leverage trending audio** formats & sounds.  
+4. **Post Wed/Thu evenings (6–9 PM IST)** for peak visibility.  
+5. **Collaborate** with peers/influencers – co-tags double viral odds.  
+6. **Optimize captions** with 2–3 targeted hashtags + emojis.
 """)
 
 # ── Download & Predict & Diagnose ─────────────────────────────────────────────
 st.subheader("⬇️ Download Full Data")
-st.download_button("Download CSV", df.to_csv(index=False).encode('utf-8'),
-                   "reels_predictions.csv", "text/csv")
+st.download_button(
+    "Download CSV",
+    df.to_csv(index=False).encode('utf-8'),
+    "reels_with_predictions.csv",
+    "text/csv"
+)
 
 st.subheader("🎯 Predict & Diagnose for a New Reel")
 with st.form("diagnose_form"):
-    s  = st.number_input("Shares",    min_value=0, value=0)
-    sv = st.number_input("Saves",     min_value=0, value=0)
-    c  = st.number_input("Comments",  min_value=0, value=0)
-    l  = st.number_input("Likes",     min_value=0, value=0)
-    ar = st.number_input("Actual Reach", min_value=0, value=0)
+    s  = st.number_input("Shares",      0, value=0)
+    sv = st.number_input("Saves",       0, value=0)
+    c  = st.number_input("Comments",    0, value=0)
+    l  = st.number_input("Likes",       0, value=0)
+    ar = st.number_input("Actual Reach",0, value=0)
     go = st.form_submit_button("Diagnose")
 
 if go:
-    inp     = pd.DataFrame([{'shares':s,'saved':sv,'comments':c,'likes':l}])
-    pred    = model.predict(inp)[0]
-    perf    = categorize(ar, pred)
+    inp  = pd.DataFrame([{'shares':s,'saved':sv,'comments':c,'likes':l}])
+    pred = model.predict(inp)[0]
+    perf = categorize(ar, pred)
+
     st.success(f"📢 Predicted Reach: {fmt(pred)}")
     st.info   (f"🔎 Actual Reach: {fmt(ar)}")
     st.info   (f"🎯 Category: **{perf}**")
@@ -213,23 +229,16 @@ if go:
     st.markdown("**📈 Engagement Correlations by Category:**")
     st.table(corr_by_cat)
 
-    # map current → next better tier
-    promotion = {
-        'Poor':'Average',
-        'Average':'Good',
-        'Good':'Excellent',
-        'Excellent':'Viral'
-    }
+    # Promotion mapping
+    promotion = {'Poor':'Average','Average':'Good','Good':'Excellent','Excellent':'Viral'}
     if perf in promotion:
         target = promotion[perf]
         rcat   = corr_by_cat[target]
-        if rcat.isna().all():
-            st.write("🔍 Not enough data to recommend optimizations for the next tier.")
-        else:
+        if rcat.notna().any():
             best_m = rcat.idxmax()
             best_v = rcat.max()
-            st.markdown(
-              f"🔜 To move **{perf}** → **{target}**, focus on **{best_m.capitalize()}** (r={best_v:.2f})."
-            )
+            st.markdown(f"🔜 To move **{perf}** → **{target}**, focus on **{best_m.capitalize()}** (r={best_v:.2f}).")
+        else:
+            st.write("🔍 Not enough data to recommend the next step.")
     else:
-        st.markdown("🎉 You’re already in **Viral** territory—keep it up!")
+        st.markdown("✅ You’re already in **Viral** territory—awesome work!")
