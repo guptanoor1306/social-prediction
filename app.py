@@ -113,16 +113,16 @@ def fmt(n):
 # ── 9) SUMMARY INSIGHTS: ALL POSTS (FIXED) ───────────────────────────────────
 st.subheader("📈 Summary Insights (All Categories)")
 
-# Show individual post performance instead of misleading totals
+# Show meaningful metrics instead of identical averages
 total_posts = len(df)
-avg_actual = df['reach'].mean()
-avg_predicted = df['predicted_reach'].mean()
+total_actual = df['reach'].sum()
+total_predicted = df['predicted_reach'].sum()
 mae = np.mean(np.abs(df['reach'] - df['predicted_reach']))
 
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Total Posts", str(total_posts))
-c2.metric("Avg Actual Reach", fmt(avg_actual))
-c3.metric("Avg Predicted Reach", fmt(avg_predicted))
+c2.metric("Total Actual Reach", fmt(total_actual))
+c3.metric("Mean Abs Error", fmt(mae))
 c4.metric("Model R² Score", f"{r2:.3f}")
 
 # Explain the "Poor" category
@@ -139,14 +139,14 @@ ve = df[df['performance'].isin(['Viral','Excellent'])]
 if not ve.empty:
     ve_count = len(ve)
     ve_pct = (ve_count / len(df)) * 100
-    ve_avg_actual = ve['reach'].mean()
-    ve_avg_predicted = ve['predicted_reach'].mean()
-    avg_virality = (ve['reach'] / ve['predicted_reach']).mean()
+    ve_total_actual = ve['reach'].sum()
+    ve_total_predicted = ve['predicted_reach'].sum()
+    avg_virality = (ve['reach'] / np.where(ve['predicted_reach'] > 0, ve['predicted_reach'], 1)).mean()
     
     c5, c6, c7, c8 = st.columns(4)
     c5.metric("V&E Posts", f"{ve_count} ({ve_pct:.1f}%)")
-    c6.metric("Avg Actual Reach", fmt(ve_avg_actual))
-    c7.metric("Avg Predicted Reach", fmt(ve_avg_predicted))
+    c6.metric("Total Actual Reach", fmt(ve_total_actual))
+    c7.metric("Total Predicted Reach", fmt(ve_total_predicted))
     c8.metric("Avg Virality Ratio", f"{avg_virality:.2f}x")
     
     with st.expander("🧠 Understanding High Performance"):
