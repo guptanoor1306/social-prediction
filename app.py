@@ -24,27 +24,34 @@ for col in ['reach','shares','saved','comments','likes']:
                    .astype(float)
         )
 
-# ── 3) TRAIN & CATEGORIZE ON FULL DATA ────────────────────────────────────────
+# ── 3) TRAIN & CATEGORIZE ON FULL DATA (for correlations) ────────────────────
 features = [c for c in ['shares','saved','comments','likes'] if c in df_full.columns]
-X_full = df_full[features].fillna(0)
-y_full = df_full['reach'].fillna(0)
-full_model = LinearRegression().fit(X_full, y_full)
-df_full['predicted_reach'] = full_model.predict(X_full)
 
-def categorize_ratio(a, p):
-    if p <= 0:      return 'Poor'
-    r = a/p
-    if r > 2.0:     return 'Viral'
-    if r > 1.5:     return 'Excellent'
-    if r > 1.0:     return 'Good'
-    if r > 0.5:     return 'Average'
+# Full-data regression (not used for summaries, only for corr_by_cat)
+Xf = df_full[features].fillna(0)
+yf = df_full['reach'].fillna(0)
+full_model = LinearRegression().fit(Xf, yf)
+df_full['pred_full'] = full_model.predict(Xf)
+
+def categorize_ratio(actual, pred):
+    if pred <= 0:
+        return 'Poor'
+    r = actual / pred
+    if r > 2.0:
+        return 'Viral'
+    if r > 1.5:
+        return 'Excellent'
+    if r > 1.0:
+        return 'Good'
+    if r > 0.5:
+        return 'Average'
     return 'Poor'
 
-df_full['performance'] = df_full.apply(
-    lambda r: categorize_ratio(r['reach'], r['predicted_reach']), axis=1
+df_full['performance_full'] = df_full.apply(
+    lambda r: categorize_ratio(r['reach'], r['pred_full']), axis=1
 )
 
-# ── 4) ONE-TIME CORRELATIONS BY CATEGORY (FULL DATA) ──────────────────────────
+# ── 4) ONE-TIME: CORRELATIONS BY CATEGORY ON FULL DATA ────────────────────────
 cats = ['Viral','Excellent','Good','Average','Poor']
 corr_by_cat = pd.DataFrame(index=features, columns=cats)
 df_no = df_full.copy()
@@ -53,16 +60,14 @@ for f in features + ['reach']:
     df_no = df_no[df_no[f].between(lo, hi)]
 
 for cat in cats:
-    sub = df_no[df_no['performance'] == cat]
-    if len(sub) >= 3:  # require ≥3 for stable correlation
+    sub = df_no[df_no['performance_full'] == cat]
+    if len(sub) >= 2:  # require at least 2 posts
         corr_by_cat[cat] = sub[features + ['reach']].corr().loc['reach', features]
     else:
         corr_by_cat[cat] = np.nan
 
-# ── 5) COPY FOR FILTERING & FILTERED MODEL ────────────────────────────────────
+# ── 5) COPY FOR FILTERING & APPLY DATE FILTER ────────────────────────────────
 df = df_full.copy()
-
-# ── 6) DATE FILTER IN SIDEBAR ─────────────────────────────────────────────────
 date_col = next((c for c in df.columns if 'date' in c), None)
 if date_col:
     df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
@@ -70,54 +75,57 @@ if date_col:
     df['post_date']    = df[date_col].dt.date
     df['post_date_dt'] = pd.to_datetime(df['post_date'])
     st.sidebar.subheader("📅 Filter by Post Date")
-    start_date, end_date = st.sidebar.date_input(
+    sd, ed = st.sidebar.date_input(
         "Select date range",
         [df['post_date'].min(), df['post_date'].max()]
     )
-    df = df[df['post_date'].between(start_date, end_date)]
+    df = df[df['post_date'].between(sd, ed)]
 else:
     st.sidebar.info("No date column found for filtering.")
 
-# ── 7) RETRAIN REGRESSION ON FILTERED DATA ────────────────────────────────────
+# ── 6) RETRAIN ON FILTERED DATA ───────────────────────────────────────────────
 X = df[features].fillna(0)
 y = df['reach'].fillna(0)
 model = LinearRegression().fit(X, y)
 df['predicted_reach'] = model.predict(X)
 
-# ── 8) RATIO-BASED CATEGORIZATION FOR FILTERED DATA ───────────────────────────
+# ── 7) RATIO-BASED CATEGORIZATION ON FILTERED DATA ────────────────────────────
 df['performance'] = df.apply(
     lambda r: categorize_ratio(r['reach'], r['predicted_reach']), axis=1
 )
 
-# ── 9) NUMBER FORMATTING HELPER ───────────────────────────────────────────────
+# ── 8) FORMAT HELPER ──────────────────────────────────────────────────────────
 def fmt(n):
-    if pd.isna(n):      return "-"
-    if n >= 1e6:        return f"{n/1e6:.2f}M"
-    if n >= 1e3:        return f"{n/1e3:.1f}K"
+    if pd.isna(n):
+        return "-"
+    if n >= 1e6:
+        return f"{n/1e6:.2f}M"
+    if n >= 1e3:
+        return f"{n/1e3:.1f}K"
     return str(int(n))
 
-# ── 10) SUMMARY INSIGHTS: ALL POSTS ────────────────────────────────────────────
+# ── 9) SUMMARY INSIGHTS: ALL POSTS ────────────────────────────────────────────
 st.subheader("📈 Summary Insights (All Categories Totals)")
-total_act_all = df['reach'].sum()
-total_pred_all = df['predicted_reach'].sum()
-err_pct_all = (abs(total_act_all - total_pred_all) / total_pred_all * 100) if total_pred_all else 0
+act_all = df['reach'].sum()
+pred_all = df['predicted_reach'].sum()
+err_all = (abs(act_all - pred_all) / pred_all * 100) if pred_all else 0
 c1, c2, c3 = st.columns(3)
-c1.metric("Total Actual Reach",    fmt(total_act_all))
-c2.metric("Total Predicted Reach", fmt(total_pred_all))
-c3.metric("Mean % Error",          f"{err_pct_all:.2f}%")
+c1.metric("Total Actual Reach",    fmt(act_all))
+c2.metric("Total Predicted Reach", fmt(pred_all))
+c3.metric("Mean % Error",          f"{err_all:.2f}%")
 
-# ── 11) SUMMARY INSIGHTS: VIRAL & EXCELLENT ──────────────────────────────────
+# ── 10) SUMMARY INSIGHTS: VIRAL & EXCELLENT ──────────────────────────────────
 st.subheader("📈 Summary Insights (Viral & Excellent Totals)")
 ve = df[df['performance'].isin(['Viral','Excellent'])]
-total_act_ve = ve['reach'].sum()
-total_pred_ve = ve['predicted_reach'].sum()
-err_pct_ve = (abs(total_act_ve - total_pred_ve) / total_pred_ve * 100) if total_pred_ve else 0
+act_ve = ve['reach'].sum()
+pred_ve = ve['predicted_reach'].sum()
+err_ve = (abs(act_ve - pred_ve) / pred_ve * 100) if pred_ve else 0
 c4, c5, c6 = st.columns(3)
-c4.metric("Total Actual Reach",    fmt(total_act_ve))
-c5.metric("Total Predicted Reach", fmt(total_pred_ve))
-c6.metric("Mean % Error",          f"{err_pct_ve:.2f}%")
+c4.metric("Total Actual Reach",    fmt(act_ve))
+c5.metric("Total Predicted Reach", fmt(pred_ve))
+c6.metric("Mean % Error",          f"{err_ve:.2f}%")
 
-# ── 12) VIRAL & EXCELLENT REELS TABLE ─────────────────────────────────────────
+# ── 11) VIRAL & EXCELLENT REELS TABLE ─────────────────────────────────────────
 st.subheader("🔥 Viral & Excellent Reels")
 if not ve.empty:
     table = ve[['post_date','caption'] + features + ['reach','predicted_reach','performance']].copy()
@@ -135,12 +143,12 @@ if not ve.empty:
 else:
     st.write("No Viral/Excellent reels in this date range.")
 
-# ── 13) PERFORMANCE DISTRIBUTION ───────────────────────────────────────────────
+# ── 12) PERFORMANCE DISTRIBUTION ───────────────────────────────────────────────
 st.subheader("📊 Performance Distribution")
 dist = df['performance'].value_counts().reindex(cats, fill_value=0)
 st.bar_chart(dist)
 
-# ── 14) REACH TREND OVER TIME ─────────────────────────────────────────────────
+# ── 13) REACH TREND OVER TIME ─────────────────────────────────────────────────
 st.subheader("📈 Reach Trend Over Time")
 if 'post_date_dt' in df.columns and not df.empty:
     ts = df.set_index('post_date_dt')[['reach','predicted_reach']].rename(
@@ -150,13 +158,13 @@ if 'post_date_dt' in df.columns and not df.empty:
 else:
     st.write("No date-indexed data to plot trend.")
 
-# ── 15) ENGAGEMENT CORRELATIONS BY CATEGORY (FULL DATA) ───────────────────────
+# ── 14) ENGAGEMENT CORRELATIONS (FULL DATA) ───────────────────────────────────
 st.subheader("🔗 Engagement Correlations by Category (full data)")
 corr_src = (
     corr_by_cat
-      .reset_index()
-      .melt('index', var_name='Category', value_name='Correlation')
-      .rename(columns={'index':'Engagement'})
+     .reset_index()
+     .melt('index', var_name='Category', value_name='Correlation')
+     .rename(columns={'index':'Engagement'})
 )
 chart = (
     alt.Chart(corr_src)
@@ -171,12 +179,12 @@ chart = (
 )
 st.altair_chart(chart, use_container_width=True)
 
-# ── 16) CONTENT INTELLIGENCE ──────────────────────────────────────────────────
+# ── 15) CONTENT INTELLIGENCE ──────────────────────────────────────────────────
 st.subheader("🧠 Content Intelligence")
 api_key = st.secrets.get("OPENAI_API_KEY") or st.secrets.get("general",{}).get("OPENAI_API_KEY")
 if api_key and 'caption' in df_full.columns:
     client = openai.OpenAI(api_key=api_key)
-    sample = df_full['caption'].dropna().astype(str).sample(min(5, len(df_full))).tolist()
+    sample = df_full['caption'].dropna().astype(str).sample(min(5,len(df_full))).tolist()
     prompt = (
         "You are an Instagram strategist. Based on these 5 reel captions:\n\n"
         + "\n".join(f"- {t}" for t in sample)
@@ -196,7 +204,7 @@ if api_key and 'caption' in df_full.columns:
 else:
     st.info("Add OPENAI_API_KEY to Streamlit secrets to enable Content Intelligence.")
 
-# ── 17) STRATEGIC TAKEAWAYS ───────────────────────────────────────────────────
+# ── 16) STRATEGIC TAKEAWAYS ───────────────────────────────────────────────────
 st.subheader("🚀 Strategic Takeaways")
 st.markdown("""
 1. **Double-down on saveable “how-to” tips** – high saves drive long-term reach.  
@@ -207,7 +215,7 @@ st.markdown("""
 6. **Optimize captions** with targeted hashtags + emojis.
 """)
 
-# ── 18) DOWNLOAD & PREDICT & DIAGNOSE ─────────────────────────────────────────
+# ── 17) DOWNLOAD & PREDICT & DIAGNOSE ─────────────────────────────────────────
 st.subheader("⬇️ Download Full Data")
 st.download_button(
     "Download CSV",
