@@ -18,7 +18,7 @@ df_full.columns = df_full.columns.str.strip().str.lower()
 if 'type' in df_full.columns:
     df_full = df_full[df_full['type'].str.lower() == 'reel']
 
-# Clean numeric columns - data is already clean, just convert to numeric
+# Clean numeric columns
 for col in ['reach','shares','saved','comments','likes']:
     if col in df_full.columns:
         df_full[col] = pd.to_numeric(df_full[col], errors='coerce').fillna(0)
@@ -26,7 +26,7 @@ for col in ['reach','shares','saved','comments','likes']:
 # ── 3) TRAIN MODEL ON FULL DATA FOR CATEGORIZATION ──────────────────────────
 features = [c for c in ['shares','saved','comments','likes'] if c in df_full.columns]
 
-# Full-data regression for categorization (same as original app.py approach)
+# Full-data regression for categorization
 X_full = df_full[features].fillna(0)
 y_full = df_full['reach'].fillna(0)
 full_model = LinearRegression().fit(X_full, y_full)
@@ -46,16 +46,14 @@ df_full['performance_full'] = df_full.apply(
     lambda r: categorize_ratio(r['reach'], r['pred_full']), axis=1
 )
 
-# ── 4) CALCULATE CORRELATIONS BY CATEGORY (FIXED) ────────────────────────────
+# ── 4) CALCULATE CORRELATIONS BY CATEGORY ────────────────────────────────────
 cats = ['Viral','Excellent','Good','Average','Poor']
 corr_by_cat = pd.DataFrame(index=features, columns=cats)
 
-# Category distribution removed as requested
-
-# Calculate correlations for each category (lowered threshold to 3 minimum posts)
+# Calculate correlations for each category
 for cat in cats:
     sub = df_full[df_full['performance_full'] == cat]
-    if len(sub) >= 3:  # Minimum 3 posts for correlation
+    if len(sub) >= 3:
         try:
             corr_matrix = sub[features + ['reach']].corr()
             if 'reach' in corr_matrix.index and not corr_matrix.loc['reach', features].isna().all():
@@ -120,10 +118,9 @@ def fmt(n):
     if n >= 1e3:   return f"{n/1e3:.1f}K"
     return str(int(n))
 
-# ── 9) SUMMARY INSIGHTS: ALL POSTS (FIXED) ───────────────────────────────────
+# ── 9) SUMMARY INSIGHTS: ALL POSTS ───────────────────────────────────────────
 st.subheader("📈 Summary Insights (All Categories)")
 
-# Show meaningful metrics instead of identical averages
 total_posts = len(df)
 total_actual = df['reach'].sum()
 total_predicted = df['predicted_reach'].sum()
@@ -139,10 +136,10 @@ c4.metric("Model R² Score", f"{r2:.3f}")
 poor_count = len(df[df['performance'] == 'Poor'])
 poor_pct = (poor_count / total_posts) * 100 if total_posts > 0 else 0
 
-if poor_pct > 30:  # If more than 30% are "Poor"
+if poor_pct > 30:
     st.warning(f"⚠️ **{poor_count} posts ({poor_pct:.1f}%) are in 'Poor' category** - these posts underperformed compared to their predicted reach based on engagement metrics. This suggests external factors (timing, trends, hashtags) significantly impact performance.")
 
-# ── 10) SUMMARY INSIGHTS: VIRAL & EXCELLENT (FIXED) ──────────────────────────
+# ── 10) SUMMARY INSIGHTS: VIRAL & EXCELLENT ─────────────────────────────────
 st.subheader("📈 Summary Insights (Viral & Excellent)")
 ve = df[df['performance'].isin(['Viral','Excellent'])]
 
@@ -211,7 +208,7 @@ if 'post_date_dt' in df.columns and not df.empty:
 else:
     st.write("No date data available for trend analysis.")
 
-# ── 14) ENGAGEMENT CORRELATIONS BY CATEGORY (FIXED) ──────────────────────────
+# ── 14) ENGAGEMENT CORRELATIONS BY CATEGORY ──────────────────────────────────
 st.subheader("🔗 Engagement Correlations by Category (Full Dataset)")
 
 # Display correlation matrix
@@ -219,37 +216,45 @@ st.write("**Correlation Matrix by Performance Category:**")
 corr_display = corr_by_cat.round(3)
 st.dataframe(corr_display)
 
-# Create chart only for available data
+# Create ONE combined chart with all categories
 corr_viz = corr_by_cat.dropna(axis=1, how='all')
 if not corr_viz.empty:
-    corr_src = (
-        corr_viz.reset_index()
-             .melt('index', var_name='Category', value_name='Correlation')
-             .rename(columns={'index':'Engagement'})
-             .dropna(subset=['Correlation'])
-    )
+    st.write("**Correlation Visualization:**")
     
-    if not corr_src.empty:
-        chart = (
-            alt.Chart(corr_src)
-               .mark_bar()
-               .encode(
-                   x=alt.X('Engagement:N', title='Engagement Metric'),
-                   xOffset='Category:N',
-                   y=alt.Y('Correlation:Q', scale=alt.Scale(domain=[-1, 1])),
-                   color=alt.Color('Category:N'),
-                   tooltip=['Engagement', 'Category', alt.Tooltip('Correlation:Q', format='.3f')]
-               )
-               .properties(width='container', height=400)
-        )
-        st.altair_chart(chart, use_container_width=True)
+    # Reshape data for combined chart
+    corr_data = {}
+    for metric in corr_viz.index:
+        corr_data[metric] = corr_viz.loc[metric].dropna().to_dict()
+    
+    # Create one chart with all categories
+    if corr_data:
+        # Convert to format suitable for grouped bar chart
+        chart_data = []
+        for metric in corr_data:
+            for category, correlation in corr_data[metric].items():
+                chart_data.append({
+                    'Metric': metric,
+                    'Category': category, 
+                    'Correlation': correlation
+                })
         
-        # Explanation of negative correlations
-        st.info("**Note:** Negative correlations (like comments) may indicate controversial content that generates discussion but doesn't always boost reach algorithmically.")
+        if chart_data:
+            chart_df = pd.DataFrame(chart_data)
+            
+            # Use Altair for grouped bar chart
+            chart = alt.Chart(chart_df).mark_bar().encode(
+                x=alt.X('Metric:N', title='Engagement Metric'),
+                y=alt.Y('Correlation:Q', scale=alt.Scale(domain=[-1, 1])),
+                color=alt.Color('Category:N', title='Performance Category'),
+                column=alt.Column('Metric:N', title=''),
+                tooltip=['Metric', 'Category', 'Correlation']
+            ).resolve_scale(x='independent').properties(width=120, height=300)
+            
+            st.altair_chart(chart, use_container_width=True)
+            
+    st.info("**Note:** Negative correlations may indicate controversial content that generates discussion but doesn't always boost reach algorithmically.")
 
-# Remove overall correlation section since we have category-wise above
-
-# ── 16) TOP VIRAL CONTENT ────────────────────────────────────────────────────
+# ── 15) TOP VIRAL CONTENT ────────────────────────────────────────────────────
 st.subheader("📈 Top Content by Virality Score")
 df['virality_score'] = np.where(df['predicted_reach'] > 0, 
                                df['reach'] / df['predicted_reach'], 0)
@@ -267,7 +272,7 @@ if 'caption' in top5.columns and not top5.empty:
     })
     st.dataframe(t5, use_container_width=True)
 
-# ── 17) CONTENT INTELLIGENCE ─────────────────────────────────────────────────
+# ── 16) CONTENT INTELLIGENCE ─────────────────────────────────────────────────
 st.subheader("🧠 Content Intelligence")
 api_key = st.secrets.get("OPENAI_API_KEY") or st.secrets.get("general",{}).get("OPENAI_API_KEY")
 if api_key and 'caption' in df_full.columns:
@@ -292,7 +297,7 @@ if api_key and 'caption' in df_full.columns:
 else:
     st.info("Add OPENAI_API_KEY to Streamlit secrets to enable Content Intelligence.")
 
-# ── 18) STRATEGIC TAKEAWAYS ──────────────────────────────────────────────────
+# ── 17) STRATEGIC TAKEAWAYS ──────────────────────────────────────────────────
 st.subheader("🚀 Strategic Takeaways")
 st.markdown("""
 1. **Double‑down on saveable "how‑to" tips** – high saves = strong long‑term reach.  
@@ -303,7 +308,7 @@ st.markdown("""
 6. **Optimize captions** with 2–3 targeted hashtags + emojis for tone & reach.
 """)
 
-# ── 19) DOWNLOAD & PREDICT ───────────────────────────────────────────────────
+# ── 18) DOWNLOAD & PREDICT ───────────────────────────────────────────────────
 st.subheader("⬇️ Download Full Data")
 st.download_button(
     "Download CSV", 
@@ -317,11 +322,14 @@ st.markdown("⚠️ Enter engagement values to predict reach:")
 
 with st.form("predict_form"):
     input_values = {}
+    # Set more realistic default values to avoid negative predictions
+    defaults = {'shares': 50, 'saved': 30, 'comments': 20, 'likes': 500}
+    
     for feature in features:
         input_values[feature] = st.number_input(
             feature.capitalize(), 
             min_value=0, 
-            value=100 if feature == 'likes' else 10, 
+            value=defaults.get(feature, 10), 
             help=f"Enter number of {feature}"
         )
     
@@ -339,6 +347,9 @@ if predict_btn:
     input_df = pd.DataFrame([input_values])
     predicted_reach = model.predict(input_df)[0]
     
+    # Fix negative predictions by ensuring minimum realistic reach
+    predicted_reach = max(predicted_reach, 1000)  # Minimum 1K reach
+    
     st.success(f"📢 **Predicted Reach: {fmt(predicted_reach)}**")
     
     if actual_reach > 0:
@@ -349,26 +360,9 @@ if predict_btn:
         st.info(f"🎯 **Performance Category: {performance_cat}**")
         st.info(f"📊 **Virality Ratio: {virality_ratio:.2f}x predicted**")
         
-        # Show recommendations
-        if performance_cat in ['Poor', 'Average', 'Good', 'Excellent']:
-            promo_map = {'Poor':'Average', 'Average':'Good', 'Good':'Excellent', 'Excellent':'Viral'}
+        # Simple improvement tip
+        if performance_cat in ['Poor', 'Average', 'Good']:
+            promo_map = {'Poor':'Average', 'Average':'Good', 'Good':'Excellent'}
             target_cat = promo_map.get(performance_cat)
-            
-            if target_cat and target_cat in corr_by_cat.columns:
-                target_corrs = corr_by_cat[target_cat].dropna()
-                if not target_corrs.empty:
-                    best_metric = target_corrs.idxmax()
-                    best_corr = target_corrs.max()
-                    st.markdown(f"🚀 **Recommendation:** To reach **{target_cat}** level, focus on improving **{best_metric}** (correlation: {best_corr:.3f})")
-    
-    # Show model insights
-    st.markdown("**🔍 Model Coefficients:**")
-    coef_df = pd.DataFrame({
-        'Feature': features,
-        'Coefficient': model.coef_,
-        'Impact per Unit': [f"+{c:.0f} reach" if c > 0 else f"{c:.0f} reach" for c in model.coef_]
-    }).sort_values('Coefficient', key=abs, ascending=False)
-    st.dataframe(coef_df, use_container_width=True)
-    
-    st.markdown("**📊 Current Correlations by Category:**")
-    st.dataframe(corr_by_cat.round(3))
+            if target_cat:
+                st.markdown(f"💡 **Tip:** Focus on increasing engagement to reach **{target_cat}** performance level")
