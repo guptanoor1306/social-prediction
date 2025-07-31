@@ -1,38 +1,41 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 from sklearn.linear_model import LinearRegression
-from sklearn.metrics import r2_score, mean_squared_error
 import openai
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Instagram Reels Performance Dashboard", layout="wide")
 st.title("📊 Instagram Reels Performance Dashboard")
 
-# ── Load & preprocess data ────────────────────────────────────────────────────
+# ── Load & normalize columns ───────────────────────────────────────────────────
 df = pd.read_csv("posts_zero1byzerodha.csv")
+
+# unify column names to lowercase no-leading/trailing spaces
 df.columns = df.columns.str.strip().str.lower()
 
-# Keep only Reels
+# map any column containing these keywords to our standard names
+col_map = {}
+for c in df.columns:
+    if "share" in c and "shares" not in col_map.values():
+        col_map[c] = "shares"
+    if "save" in c and "saved" not in col_map.values():
+        col_map[c] = "saved"
+    if "comment" in c and "comments" not in col_map.values():
+        col_map[c] = "comments"
+    if "like" in c and "likes" not in col_map.values():
+        col_map[c] = "likes"
+df = df.rename(columns=col_map)
+
+# ── Keep only Reels and filter by date ─────────────────────────────────────────
 if 'type' in df.columns:
     df = df[df['type'].str.lower() == 'reel']
 
-# Clean numeric fields
-for c in ['reach','likes','comments','shares','saved']:
-    if c in df.columns:
-        df[c] = (
-            df[c].astype(str)
-                  .str.replace(r'[^\d.]','',regex=True)
-                  .replace('', np.nan)
-                  .astype(float)
-        )
-
-# ── Date filter ───────────────────────────────────────────────────────────────
+# detect date column
 date_col = next((c for c in df.columns if 'date' in c), None)
 if date_col:
     df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
-    df.dropna(subset=[date_col], inplace=True)
+    df = df.dropna(subset=[date_col])
     df['post_date'] = df[date_col].dt.date
     df['post_date_dt'] = pd.to_datetime(df['post_date'])
 
@@ -45,6 +48,16 @@ if date_col:
 else:
     st.sidebar.info("No date column found for filtering.")
 
+# ── Clean numeric fields ───────────────────────────────────────────────────────
+for field in ['reach','likes','comments','shares','saved']:
+    if field in df.columns:
+        df[field] = (
+            df[field].astype(str)
+                     .str.replace(r'[^\d.]', '', regex=True)
+                     .replace('', np.nan)
+                     .astype(float)
+        )
+
 # ── Train & Predict (Linear Regression) ───────────────────────────────────────
 features = [f for f in ['shares','saved','comments','likes'] if f in df.columns]
 X = df[features].fillna(0)
@@ -53,7 +66,7 @@ y = df['reach'].fillna(0)
 model = LinearRegression().fit(X, y)
 df['predicted_reach'] = model.predict(X)
 
-# ── Compute historical correlations ────────────────────────────────────────────
+# ── Historical correlations ────────────────────────────────────────────────────
 corr = df[features + ['reach']].corr()['reach'].drop('reach').sort_values(ascending=False)
 
 # ── Categorize performance ────────────────────────────────────────────────────
@@ -90,7 +103,7 @@ c3.metric("Deviation %",           f"{dev:.2f}%")
 with st.expander("🧠 Why high deviation?"):
     st.markdown("- Collab/outlier reels skew totals.")
     st.markdown("- Linear model under/over estimates extremes.")
-    st.markdown("- Summarizes only Viral & Excellent.")
+    st.markdown("- Summaries only include Viral & Excellent.")
 
 # ── Viral & Excellent Table ───────────────────────────────────────────────────
 st.subheader("🔥 Viral & Excellent Reels")
@@ -103,7 +116,7 @@ if not ve.empty:
     disp = disp.rename(columns={
         'post_date':'Date','caption':'Caption',
         'shares':'Shares','saved':'Saves','comments':'Comments','likes':'Likes',
-        'reach':'Reach','predicted_reach':'Predicted','performance':'Performance'
+        'reach':'Reach','predicted_reach':'Predicted Reach','performance':'Performance'
     })
     st.dataframe(disp.style.set_properties(
         subset=['Caption'], **{'white-space':'pre-wrap'}),
@@ -112,7 +125,7 @@ if not ve.empty:
 else:
     st.write("No Viral/Excellent reels in this range.")
 
-# ── Performance Distribution ──────────────────────────────────────────────────
+# ── Performance Distribution ─────────────────────────────────────────────────
 st.subheader("📊 Performance Distribution")
 perf_counts = df['performance'].value_counts().reindex(
     ['Viral','Excellent','Good','Average','Poor'], fill_value=0
@@ -122,7 +135,8 @@ st.bar_chart(perf_counts)
 # ── Reach Trend Over Time ─────────────────────────────────────────────────────
 st.subheader("📈 Reach Trend Over Time")
 weekly = (
-    df.set_index('post_date_dt').resample('W')[['reach','predicted_reach']]
+    df.set_index('post_date_dt')
+      .resample('W')[['reach','predicted_reach']]
       .mean()
       .rename(columns={'reach':'Actual','predicted_reach':'Predicted'})
 )
@@ -134,7 +148,6 @@ st.bar_chart(corr)
 
 # ── 💡 Intelligent Insights ───────────────────────────────────────────────────
 st.subheader("💡 Intelligent Insights")
-# 1) Average reach by weekday
 if 'post_date_dt' in df.columns:
     df['weekday'] = df['post_date_dt'].dt.day_name()
     avg_by_day = df.groupby('weekday')['reach'].mean().reindex(
@@ -144,41 +157,35 @@ if 'post_date_dt' in df.columns:
     best = avg_by_day.idxmax()
     st.markdown(f"- 📅 Highest avg reach on **{best}** ({fmt(avg_by_day.max())}).")
 
-# 2) Reach distribution quartiles
 q1,q2,q3 = df['reach'].quantile([0.25,0.50,0.75])
-st.markdown(
-    f"- 📊 Reach quartiles: 25% < {fmt(q1)}, median {fmt(q2)}, 75% > {fmt(q3)}."
-)
+st.markdown(f"- 📊 Reach quartiles: 25% < {fmt(q1)}, median {fmt(q2)}, 75% > {fmt(q3)}.")
 
 # ── Content Intelligence (NLP) ─────────────────────────────────────────────────
 st.subheader("🧠 Content Intelligence (NLP)")
 api_key = st.secrets.get("OPENAI_API_KEY") or st.secrets.get("general",{}).get("OPENAI_API_KEY")
-if not api_key:
-    st.warning("🛑 Add OPENAI_API_KEY to Streamlit secrets.")
-else:
+if api_key and ('caption' in df.columns or 'title' in df.columns):
     client = openai.OpenAI(api_key=api_key)
-    text_col = 'caption' if 'caption' in df.columns else ('title' if 'title' in df.columns else None)
-    if text_col:
-        texts = df[text_col].dropna().astype(str)
-        if len(texts):
-            sample = texts.sample(min(5,len(texts))).tolist()
-            prompt = (
-                f"You are an Instagram strategist. Analyze these {text_col}s for patterns, themes, and tone:\n"
-                + "\n".join(sample)
+    text_col = 'caption' if 'caption' in df.columns else 'title'
+    texts = df[text_col].dropna().astype(str)
+    if texts.any():
+        sample = texts.sample(min(5,len(texts))).tolist()
+        prompt = (
+            f"You are an Instagram strategist. Analyze these {text_col}s for patterns, themes, and tone:\n"
+            + "\n".join(sample)
+        )
+        try:
+            resp = client.chat.completions.create(
+                model="gpt-4", messages=[{"role":"user","content":prompt}]
             )
-            try:
-                resp = client.chat.completions.create(
-                    model="gpt-4", messages=[{"role":"user","content":prompt}]
-                )
-                st.markdown(resp.choices[0].message.content)
-            except Exception as e:
-                st.error(f"NLP error: {e}")
-    else:
-        st.info("No caption/title column for NLP.")
+            st.markdown(resp.choices[0].message.content)
+        except Exception as e:
+            st.error(f"NLP error: {e}")
+else:
+    st.warning("Add OPENAI_API_KEY and ensure a caption/title column exists.")
 
 # ── Top 5 by Virality Score ────────────────────────────────────────────────────
 st.subheader("📈 Top Content by Virality Score")
-df['virality_score'] = df['reach']/np.where(df['predicted_reach']==0, np.nan, df['predicted_reach'])
+df['virality_score'] = df['reach'] / np.where(df['predicted_reach']==0, np.nan, df['predicted_reach'])
 df['virality_score'] = df['virality_score'].replace([np.inf,-np.inf],np.nan).fillna(0)
 top5 = df.nlargest(5,'virality_score')
 if 'caption' in top5.columns:
@@ -194,21 +201,20 @@ if 'caption' in top5.columns:
 
 # ── Strategic Takeaways ───────────────────────────────────────────────────────
 st.subheader("🚀 Strategic Takeaways")
-st.markdown("""
-1. **Double-down on saveable ‘how-to’ tips** – high saves drive long-term reach.  
-2. **Boost share prompts** – shares correlate most strongly (_r_≈{corr['shares']:.2f}).  
+st.markdown(f"""
+1. **Double-down on saveable “how-to” tips** – high saves drive long-term reach.  
+2. **Boost share prompts** – shares correlate most strongly (r={corr['shares']:.2f}).  
 3. **Leverage trending audio** formats & sounds.  
 4. **Post mid-week evenings** (Wed/Thu 6–9 PM IST).  
-5. **Collaborate** – co-tags double your viral chances.  
+5. **Collaborate** – co-tags double viral chances.  
 6. **Optimize captions** with 2–3 targeted hashtags + emojis.
-""".format(corr=corr))
+""")
 
-# ── Download Full Data ─────────────────────────────────────────────────────────
+# ── Download & Predict & Diagnose ─────────────────────────────────────────────
 st.subheader("⬇️ Download Full Data")
 st.download_button("Download CSV", df.to_csv(index=False).encode('utf-8'),
                    "reels_with_predictions.csv", mime="text/csv")
 
-# ── Predict & Diagnose ─────────────────────────────────────────────────────────
 st.subheader("🎯 Predict & Diagnose for a New Reel")
 with st.form("pd_form"):
     s  = st.number_input("Shares",    min_value=0, value=0)
@@ -225,13 +231,10 @@ if go:
     st.info(f"🔎 Actual Reach: {fmt(ar)}")
     st.info(f"⚖️ Residual: {fmt(ar - pred)}")
 
-    # Show correlation table
     st.markdown("**📈 Historical correlations with Reach:**")
     corr_df = corr.reset_index().rename(columns={'index':'Metric','reach':'Correlation'})
     st.table(corr_df.style.format({'Correlation':"{:.2f}"}))
 
-    # Recommend top metric to optimize
     top_m = corr.idxmax()
     top_r = corr.max()
-    st.markdown(f"**Recommendation:** Focus on **{top_m.capitalize()}** (r={top_r:.2f}), " +
-                "which historically drives reach most strongly.")
+    st.markdown(f"**Recommendation:** Focus on **{top_m.capitalize()}** (r={top_r:.2f}).")
