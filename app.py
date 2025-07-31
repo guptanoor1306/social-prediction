@@ -77,12 +77,22 @@ if date_col:
     st.sidebar.subheader("📅 Filter by Post Date")
     dates = st.sidebar.date_input(
         "Select date range",
-        [df['post_date'].min(), df['post_date'].max()]
+        value=[df['post_date'].min(), df['post_date'].max()],
+        key="date_range"
     )
-    if isinstance(dates, (list, tuple)) and len(dates) == 2:
-        start_date, end_date = dates
+    
+    # Handle different date input formats
+    if isinstance(dates, (list, tuple)):
+        if len(dates) == 2:
+            start_date, end_date = dates[0], dates[1]
+        elif len(dates) == 1:
+            start_date = end_date = dates[0]
+        else:
+            start_date, end_date = df['post_date'].min(), df['post_date'].max()
     else:
         start_date = end_date = dates
+    
+    # Filter data by date range
     df = df[df['post_date'].between(start_date, end_date)]
 else:
     st.sidebar.info("No date column found for filtering.")
